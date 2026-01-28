@@ -17,7 +17,7 @@ exports.sendInquiryEmail = async (data) => {
     const transporter = createTransporter();
     const mailOptions = {
         from: process.env.EMAIL_USER,
-        to: 'arjun.pratap05@gmail.com', // 
+        to: 'expertcomputeracademypatna@gmail.com', // 
         subject: `New Inquiry: ${data.course} from ${data.name}`,
         html: `
             <div style="font-family: sans-serif; padding: 30px; border: 1px solid #e2e8f0; border-radius: 20px; max-width: 600px;">
