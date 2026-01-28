@@ -28,5 +28,9 @@ app.use('/api/registration', require('./routes/registrationRoutes'));
 app.use('/api/inquiry', require('./routes/inquiryRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
 
+app.get('/', (req, res) => {
+    res.json({ message: "Expert Academy API is live", status: 200 });
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Expert Academy API running on port ${PORT}`));
