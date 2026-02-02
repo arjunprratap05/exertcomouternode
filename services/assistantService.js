@@ -1,27 +1,39 @@
-exports.getBotReply = async (userMsg) => {
-    const msg = userMsg.toLowerCase();
+const { techCoursesData, universityPrograms } = require('../data/course');
 
-    if (msg.includes("adca")) {
-        return "ADCA is a 6-month diploma covering MS Office, Tally Prime, and C++. No prior coding knowledge is required. Should I connect you with an executive for a detailed discussion?";
-    }
-    if (msg.includes("tally")) {
-        return "We offer Tally Essential (Levels 1-3) with 100% placement assistance. We are an empanelled partner with 38 years of experience in Patna. Talk to a counselor?";
-    }
-    if (msg.includes("excel")) {
-        return "Advanced Excel is a 3-month course focusing on business automation and pivot tables. Connect with an executive now?";
-    }
-    if (msg.includes("talk") || msg.includes("discussion") || msg.includes("executive")) {
+exports.getBotReply = async (userMsg) => {
+    const msg = userMsg.toLowerCase().trim();
+    const allCourses = [...techCoursesData, ...universityPrograms];
+
+    // 1. Handover Triggers (Keywords + Affirmative responses)
+    const affirmative = ["yes", "yeah", "ok", "okay", "yep", "sure", "connect", "talk", "human", "executive"];
+    if (affirmative.some(key => msg === key || msg.includes(key))) {
         return "HANDOVER_TRIGGER";
     }
 
-    return "I am the Expert Academy AI. I can help with info on ADCA, Tally, or Python. To talk to a human, type 'Talk to Executive'.";
+    // 2. Intelligent Course Matcher
+    const matched = allCourses.find(c => 
+        msg.includes(c.id.toLowerCase()) || 
+        c.title.toLowerCase().split(' ').some(word => word.length > 3 && msg.includes(word))
+    );
+
+    if (matched) {
+        const fee = Number(matched.fee).toLocaleString('en-IN');
+        return `Regarding **${matched.title}**:
+        \n• **Exact Fee:** ₹${fee}
+        \n• **Curriculum:** ${matched.modules.slice(0, 4).join(", ")}...
+        \n\nWould you like me to connect you with our admission counselor for batch timings?`;
+    }
+
+    // 3. Fallback logic
+    if (msg.includes("price") || msg.includes("fee")) {
+        return "Fees range from ₹3,000 to ₹46,500. Which specific course are you interested in? (e.g., ADCA, Tally, Java, or Python)";
+    }
+
+    return "I am the Expert AI. I can give you exact fees and syllabus for any course. Which one would you like to know about?";
 };
 
 exports.generateSecureLink = (agentId) => {
-    const phoneMap = {
-        "counselor_1": process.env.AGENT_1_PHONE,
-        "counselor_2": process.env.AGENT_2_PHONE
-    };
-    const target = phoneMap[agentId] || process.env.AGENT_1_PHONE;
-    return `https://wa.me/${target}?text=I need a detailed course discussion.`;
+    const phones = { "counselor_1": process.env.AGENT_1_PHONE, "counselor_2": process.env.AGENT_2_PHONE };
+    const target = phones[agentId] || process.env.AGENT_1_PHONE;
+    return `https://wa.me/${target}?text=I was just chatting with the Expert AI and I want to enroll in a course.`;
 };
