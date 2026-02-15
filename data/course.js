@@ -15,7 +15,20 @@ const techCoursesData = [
     { id: "android-apps", title: "Developing Mobile Apps for the Android Platform", fee: 10030, modules: ["UI/UX", "Activities & Intents", "Database", "API Integration"] },
     { id: "asp-net", title: "Web Application Development using ASP.net", fee: 9440, modules: ["MVC Architecture", "Entity Framework", "Web API"] },
     { id: "dca-diploma", title: "Diploma in Computer Application", fee: 6500, modules: ["Operating Systems", "MS Office", "Internet Basics"] },
-    { id: "data-analytics", title: "Professional Program in Data Analytics", fee: 22500, modules: ["SQL", "Tableau", "Power BI", "Python"] }
+    { id: "data-analytics", title: "Professional Program in Data Analytics", fee: 22500, modules: ["SQL", "Tableau", "Power BI", "Python"] },
+    { 
+        id: "gen-ai-master", 
+        title: "Advanced Diploma in Generative AI", 
+        fee: "42500", 
+        sectionId: "gen-ai-course", // Link for header sync
+        modules: [
+            "Foundations of LLMs & Transformers", 
+            "Prompt Engineering Masterclass", 
+            "Fine-tuning Custom AI Models", 
+            "Building RAG Applications",
+            "AI Ethics & Future Trends"
+        ] 
+    },
 ];
 
 const universityPrograms = [
