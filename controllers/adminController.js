@@ -8,19 +8,24 @@ exports.adminLogin = async (req, res) => {
     try {
         const { username, password } = req.body;
         let role = null;
+        
+        // Environment Variable Check
         if (username === process.env.FOUNDER_USER && password === process.env.FOUNDER_PASS) role = 'founder';
         else if (username === process.env.ACCOUNTS_USER && password === process.env.ACCOUNTS_PASS) role = 'accounts';
         else if (username === process.env.FRONTOFFICE_USER && password === process.env.FRONTOFFICE_PASS) role = 'frontoffice';
 
         if (role) {
+            // Include role in token
             const token = jwt.sign({ role, username }, process.env.JWT_SECRET, { expiresIn: '12h' });
             return res.json({ success: true, token, role });
         }
         res.status(401).json({ success: false, message: "Invalid Credentials" });
-    } catch (err) { res.status(500).json({ success: false }); }
+    } catch (err) { 
+        res.status(500).json({ success: false, message: "Server Error" }); 
+    }
 };
 
-// --- 2. ACCOUNTS: Payment Sync with Performer Tracking ---
+// --- 2. PAYMENT UPDATE ---
 exports.updateStudentPayment = async (req, res) => {
     try {
         const { id } = req.params;
@@ -32,51 +37,15 @@ exports.updateStudentPayment = async (req, res) => {
 
         await AuditLog.create({
             action: "Payment Updated",
-            performedBy: req.admin?.role?.toUpperCase() || "ACCOUNTS", 
+            performedBy: req.user?.role?.toUpperCase() || "ACCOUNTS", // Changed req.admin to req.user
             targetName: student.name,
-            details: `RECEIVED ₹${paymentLog?.amount || 0} VIA ${paymentLog?.mode?.toUpperCase() || 'CASH'} (REF: ${paymentLog?.transactionId || 'N/A'}).`
+            details: `Received ₹${paymentLog?.amount || 0} via ${paymentLog?.mode || 'N/A'}`
         });
         res.json({ success: true }); 
     } catch (err) { res.status(500).json({ success: false }); }
 };
 
-// --- 3. DATA FETCHERS WITH TROPHY & CHART ANALYTICS ---
-exports.getAuditLogs = async (req, res) => {
-    try {
-        const logs = await AuditLog.find().sort({ timestamp: -1 }).limit(500);
-        const revenueLogs = await AuditLog.find({ action: "Payment Updated" });
-        const totalRevenue = revenueLogs.reduce((acc, log) => {
-            const match = log.details.match(/₹(\d+)/);
-            return acc + (match ? parseInt(match[1]) : 0);
-        }, 0);
-
-        // RANKED ANALYTICS (Best Sellers)
-        const students = await Student.find();
-        const courseCounts = students.reduce((acc, s) => {
-            const course = s.course || "General Inquiry";
-            acc[course] = (acc[course] || 0) + 1;
-            return acc;
-        }, {});
-
-        const top3Courses = Object.entries(courseCounts)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 3)
-            .map(([title, count]) => ({ title, count }));
-
-        // REJECTION BREAKDOWN FOR FOUNDER CHART
-        const rejectionLogs = await AuditLog.find({ action: "Lead Rejected" });
-        const reasonCounts = rejectionLogs.reduce((acc, log) => {
-            const reason = log.details.replace("REJECTION REASON: ", "") || "Not Stated";
-            acc[reason] = (acc[reason] || 0) + 1;
-            return acc;
-        }, {});
-        const reasonBreakdown = Object.entries(reasonCounts).map(([name, value]) => ({ name, value }));
-
-        res.json({ success: true, logs, totalRevenue, top3Courses, reasonBreakdown });
-    } catch (err) { res.status(500).json({ success: false }); }
-};
-
-// --- 4. FRONTOFFICE: Evaluation with Staff Metadata ---
+// --- 3. ENQUIRY STATUS ---
 exports.updateEnquiryStatus = async (req, res) => {
     try {
         const { id } = req.params;
@@ -87,22 +56,58 @@ exports.updateEnquiryStatus = async (req, res) => {
 
         await AuditLog.create({
             action: enrolled ? "Lead Conversion" : "Lead Rejected",
-            performedBy: req.admin?.role?.toUpperCase() || "FRONTOFFICE",
+            performedBy: req.user?.role?.toUpperCase() || "FRONTOFFICE", // Changed req.admin to req.user
             targetName: inquiry.name,
-            details: enrolled 
-                ? "STAFF REDIRECTED TO REGISTRATION PAGE TO COMPLETE FULL PROFILE" 
-                : `REJECTION REASON: ${reason || 'NOT STATED'}`
+            details: enrolled ? "Converted to student" : `Reason: ${reason || 'N/A'}`
         });
         res.json({ success: true });
     } catch (err) { res.status(500).json({ success: false }); }
 };
 
+// --- 4. AUDIT LOGS & ANALYTICS ---
+exports.getAuditLogs = async (req, res) => {
+    try {
+        const logs = await AuditLog.find().sort({ timestamp: -1 }).limit(100);
+        const students = await Student.find();
+        const totalRevenue = students.reduce((acc, s) => acc + (Number(s.amountPaid) || 0), 0);
+        res.json({ success: true, logs, totalRevenue });
+    } catch (err) { res.status(500).json({ success: false }); }
+};
+
+// --- 5. STUDENT APPROVAL ---
+exports.approveStudent = async (req, res) => {
+    try {
+        const student = await Student.findByIdAndUpdate(req.params.id, { isApproved: true }, { new: true });
+        if (!student) return res.status(404).json({ success: false });
+
+        await AuditLog.create({
+            action: "Student Approved",
+            performedBy: req.user?.role || "ADMIN", // Changed req.admin to req.user
+            targetName: student.name,
+            details: `Approved Registration: ${student.registrationId}`
+        });
+        res.json({ success: true, msg: "Student Approved" });
+    } catch (err) { res.status(500).json({ success: false }); }
+};
+
+// --- 6. DATA FETCHERS ---
 exports.getAllStudents = async (req, res) => {
-    const data = await Student.find().sort({ createdAt: -1 });
-    res.json({ success: true, data });
+    try {
+        const data = await Student.find().sort({ createdAt: -1 });
+        res.json({ success: true, data });
+    } catch (err) { res.status(500).json({ success: false }); }
 };
 
 exports.getEnquiries = async (req, res) => {
-    const data = await Inquiry.find().sort({ createdAt: -1 });
-    res.json({ success: true, data });
+    try {
+        const data = await Inquiry.find().sort({ createdAt: -1 });
+        res.json({ success: true, data });
+    } catch (err) { res.status(500).json({ success: false }); }
+};
+
+exports.getPendingStudents = async (req, res) => {
+    try {
+        const pending = await Student.find({ isApproved: false }).sort({ createdAt: -1 });
+        res.json({ success: true, data: pending });
+    } catch (err) { res.status(500).json({ success: false }); }
 };

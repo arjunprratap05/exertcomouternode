@@ -1,13 +1,17 @@
-// routes/registrationRoutes.js
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const upload = multer();
-
-// MUST USE { handleRegistration } with curly braces
 const { handleRegistration } = require('../controllers/registrationController');
 
-// If line 6 looks like this, it will now work:
+// Use Memory Storage instead of Disk Storage
+const storage = multer.memoryStorage();
+
+const upload = multer({ 
+    storage,
+    limits: { fileSize: 5 * 1024 * 1024 } // Optional: Limit size to 5MB
+});
+
+// The flow remains the same, but req.file will now contain a buffer
 router.post('/submit', upload.single('studentImage'), handleRegistration);
 
 module.exports = router;

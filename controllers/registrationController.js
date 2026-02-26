@@ -1,47 +1,93 @@
 const Student = require('../models/student');
-const { sendRegistrationEmail } = require('../services/mailService');
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+const { sendRegistrationEmail } = require('../services/mailService'); // 1. IMPORT YOUR MAILER
 
 exports.handleRegistration = async (req, res) => {
     try {
-        // 1. Prepare data from the React form and Multer file upload
-        const studentData = {
-            ...req.body,
-            studentImage: req.file ? req.file.path : null
-        };
+        const { 
+            name, fatherName, dob, email, phone, aadhaarNo, address,
+            highSchoolBoard, interBoard, course 
+        } = req.body;
 
-        // 2. Step One: Attempt to save to MongoDB
-        const newStudent = new Student(studentData);
-        const savedStudent = await newStudent.save(); // Execution pauses here until DB confirms
+        const highSchoolYear = parseInt(req.body.highSchoolYear);
+        const highSchoolPercent = parseFloat(req.body.highSchoolPercent);
+        const interYear = parseInt(req.body.interYear);
+        const interPercent = parseFloat(req.body.interPercent);
 
-        // 3. Step Two: Only execute if Step One succeeded
-        console.log(`✅ Data secured for ${savedStudent.name}. Now shooting email...`);
-        
-        const emailResult = await sendRegistrationEmail({
-            ...req.body,
-            selectedCourse: req.body.course,
-            schoolName: req.body.highSchoolBoard,
-            schoolBoard: req.body.highSchoolBoard,
-            schoolYear: req.body.highSchoolYear,
-            highestQualification: "10th/12th Entry",
-            universityName: req.body.interBoard,
-            passingYear: req.body.interYear
+        // 1. Check for existing student
+        const existingStudent = await Student.findOne({ 
+            $or: [{ email: email.toLowerCase() }, { aadhaarNo }] 
         });
 
-        // 4. Send final response to React frontend
-        res.status(200).json({ 
-            success: true, 
-            message: "Registration saved and email dispatched!",
-            studentId: savedStudent._id,
-            emailSent: emailResult.success
+        if (existingStudent) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Student with this Email or Aadhaar already registered." 
+            });
+        }
+
+        // 2. Security: Auto-generate Password
+        const rawPassword = crypto.randomBytes(4).toString('hex').toUpperCase(); 
+        const hashedPassword = await bcrypt.hash(rawPassword, 12);
+
+        // 3. Create Student Object
+        const newStudent = new Student({
+            name,
+            fatherName,
+            dob,
+            email: email.toLowerCase().trim(),
+            phone,
+            aadhaarNo,
+            address,
+            highSchoolBoard,
+            highSchoolYear,
+            highSchoolPercent,
+            interBoard,
+            interYear,
+            interPercent,
+            course,
+            password: hashedPassword,
+            registrationId: email.toLowerCase().trim(),
+            studentImage: req.file ? {
+                data: req.file.buffer,
+                contentType: req.file.mimetype
+            } : null, 
+            status: 'Applied'
         });
 
-    } catch (err) {
-        // If MongoDB fails (e.g., duplicate Aadhaar), this block runs
-        // and NO email is sent.
-        console.error("❌ Database Save Failed. Email aborted.", err);
-        res.status(500).json({ 
+        // 4. Save to MongoDB
+        await newStudent.save();
+
+        // 5. TRIGGER EMAIL SERVICE (New Logic)
+        // We pass a combined object containing everything the mailer template needs
+        await sendRegistrationEmail({
+            name: newStudent.name,
+            email: newStudent.email,
+            selectedCourse: newStudent.course,
+            registrationId: newStudent.registrationId,
+            rawPassword: rawPassword, // Sending the unhashed password so student can see it
+            phone: newStudent.phone,
+            address: newStudent.address,
+            schoolBoard: newStudent.highSchoolBoard,
+            schoolYear: newStudent.highSchoolYear,
+            highestQualification: "High School / Intermediate",
+            universityName: newStudent.interBoard
+        });
+
+        // 6. Success Response
+        return res.status(201).json({
+            success: true,
+            registrationId: newStudent.registrationId,
+            rawPassword: rawPassword, 
+            message: "Registration Completed. Welcome email sent!"
+        });
+
+    } catch (error) {
+        console.error("Backend Error:", error);
+        return res.status(500).json({ 
             success: false, 
-            message: "Database error: Registration not processed." 
+            message: "Server Error: " + error.message 
         });
     }
 };
