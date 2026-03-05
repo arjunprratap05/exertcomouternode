@@ -2,11 +2,8 @@ const mongoose = require('mongoose');
 
 const materialSchema = new mongoose.Schema({
     title: { type: String, required: true },
-    course: { 
-        type: String, 
-        required: true 
-        // Note: This validates against your IDs like 'java-pro'
-    },
+    // This will store 'java-pro', 'gen-ai', etc.
+    course: { type: String, required: true }, 
     file: {
         data: Buffer,
         contentType: String,

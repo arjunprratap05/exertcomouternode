@@ -4,37 +4,25 @@ const multer = require('multer');
 const lmsController = require('../controllers/lmsController');
 const { authMiddleware, authorize } = require('../middleware/authMiddleware');
 
-// Setup Multer for Memory Storage
 const upload = multer({ 
     storage: multer.memoryStorage(),
-    limits: { fileSize: 16 * 1024 * 1024 } // 16MB MongoDB Limit
+    limits: { fileSize: 16 * 1024 * 1024 } 
 });
 
-// Roles allowed to manage LMS
 const staffAccess = authorize('founder', 'accounts', 'frontoffice');
 
-// Lecture Route
+// --- ADMIN ROUTES ---
 router.post('/add-lecture', authMiddleware, staffAccess, lmsController.addLecture);
-
-// Material Route (Uses upload.single middleware)
 router.post('/add-material', authMiddleware, staffAccess, upload.single('file'), lmsController.addMaterial);
+router.get('/lectures', authMiddleware, staffAccess, lmsController.getAllLectures);
+router.delete('/delete-lecture/:id', authMiddleware, staffAccess, lmsController.deleteLecture);
 
-// Student Sync Route
-router.get('/sync/:courseId', authMiddleware, lmsController.getCourseContent);
+// NEW: Missing routes to support Admin Directory
+router.get('/materials', authMiddleware, staffAccess, lmsController.getAllMaterials);
+router.delete('/delete-material/:id', authMiddleware, staffAccess, lmsController.deleteMaterial);
 
-// Add this below your sync route
+// --- STUDENT ROUTES ---
 router.get('/download/:id', authMiddleware, lmsController.downloadMaterial);
-
-router.get('/lectures', 
-    authMiddleware, 
-    authorize('founder', 'accounts', 'frontoffice'), 
-    lmsController.getAllLectures
-);
-
-router.delete('/delete-lecture/:id', 
-    authMiddleware, 
-    authorize('founder', 'accounts', 'frontoffice'), 
-    lmsController.deleteLecture
-);
+router.post('/sync-multi', authMiddleware, lmsController.syncMultiBatchLMS);
 
 module.exports = router;

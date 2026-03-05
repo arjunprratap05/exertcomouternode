@@ -35,34 +35,21 @@ exports.studentLogin = async (req, res) => {
             registrationId: { $regex: new RegExp(`^${registrationId.trim()}$`, 'i') } 
         });
 
-        if (!student) return res.status(401).json({ success: false, msg: "Invalid Registration ID" });
-        if (!student.isApproved) return res.status(401).json({ success: false, msg: "Account pending approval" });
-
+        if (!student) return res.status(401).json({ success: false, msg: "Invalid ID" });
+        
         const isMatch = await bcrypt.compare(password, student.password);
         if (!isMatch) return res.status(401).json({ success: false, msg: "Invalid Password" });
 
+        // TOKEN MUST INCLUDE BATCHID
         const token = jwt.sign(
-            { id: student._id, role: 'student', course: student.course }, 
+            { id: student._id, role: 'student', course: student.course, batchId: student.batchId }, 
             process.env.JWT_SECRET, 
             { expiresIn: '24h' }
         );
 
-        // --- THE FIX IS HERE ---
-        res.json({ 
-            success: true, 
-            token, 
-            student: {
-                name: student.name,
-                registrationId: student.registrationId,
-                course: student.course,
-                email: student.email,
-                totalFee: student.totalFee,
-                amountPaid: student.amountPaid, 
-                createdAt: student.createdAt 
-            }
-        });
+        res.json({ success: true, token, student });
     } catch (error) {
-        res.status(500).json({ success: false, msg: "Internal Server Error" });
+        res.status(500).json({ success: false, msg: "Server Error" });
     }
 };
 
@@ -169,6 +156,15 @@ exports.studentLogout = async (req, res) => {
 
         res.json({ success: true, msg: "Logged out successfully" });
     } catch (error) {
+        res.status(500).json({ success: false });
+    }
+};
+
+exports.getStudentProfile = async (req, res) => {
+    try {
+        const student = await Student.findById(req.user.id).select('-password');
+        res.json({ success: true, student });
+    } catch (err) {
         res.status(500).json({ success: false });
     }
 };

@@ -15,4 +15,9 @@ router.get('/audit-logs', authMiddleware, adminController.getAuditLogs);
 router.get('/pending-students', authMiddleware, adminController.getPendingStudents);
 router.patch('/approve-student/:id', authMiddleware, adminController.approveStudent);
 
+router.post('/batches/create', authMiddleware, adminController.createBatch);
+router.get('/batches/active', authMiddleware, adminController.getActiveBatches);
+
+router.delete('/batches/:id', authMiddleware, adminController.deleteBatch);
+
 module.exports = router;

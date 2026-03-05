@@ -1,96 +1,137 @@
+const mongoose = require('mongoose');
 const Lecture = require('../models/Lecture');
 const Material = require('../models/Material');
+const Batch = require('../models/Batch');
 
+// --- 1. ADD LECTURE (Linked to Batch) ---
 exports.addLecture = async (req, res) => {
     try {
-        // CLEANUP: Added .trim() to prevent accidental space issues
-        const courseName = req.body.course.toLowerCase().trim();
-        const lecture = new Lecture({ ...req.body, course: courseName });
-        
+        const lecture = new Lecture(req.body);
         await lecture.save();
-        res.status(201).json({ success: true, message: "Lecture synced" });
-    } catch (err) { res.status(400).json({ success: false }); }
+        res.status(201).json({ success: true, message: "Lecture synced to Batch" });
+    } catch (err) { 
+        res.status(400).json({ success: false, message: err.message }); 
+    }
 };
 
+// --- 2. ADD MATERIAL (Course-Based Logic) ---
 exports.addMaterial = async (req, res) => {
     try {
-        if (!req.file) return res.status(400).json({ success: false, message: "PDF missing" });
+        if (!req.file) return res.status(400).json({ success: false, message: "PDF file missing" });
         
-        // CLEANUP: Added .trim() here too
-        const courseName = req.body.course.toLowerCase().trim();
-        
+        // We link material to the 'course' slug/ID (e.g., 'java-pro') 
+        // instead of a specific Batch ID to avoid multiple uploads.
         const material = new Material({
             title: req.body.title,
-            course: courseName,
+            course: req.body.course.toLowerCase().trim(),
             file: { 
                 data: req.file.buffer, 
                 contentType: req.file.mimetype, 
                 fileName: req.file.originalname 
             }
         });
+
         await material.save();
-        res.status(201).json({ success: true, message: "Material pushed" });
-    } catch (err) { res.status(400).json({ success: false }); }
+        res.status(201).json({ success: true, message: "Material pushed to Course Vault" });
+    } catch (err) { 
+        console.error("Upload Error:", err);
+        res.status(400).json({ success: false, message: err.message }); 
+    }
 };
 
-exports.getCourseContent = async (req, res) => {
+// --- 3. GET ALL MATERIALS (Admin side) ---
+exports.getAllMaterials = async (req, res) => {
     try {
-        const courseId = decodeURIComponent(req.params.courseId).trim();
+        // Optimization: Do NOT send binary file data in a list view
+        const materials = await Material.find()
+            .select('-file.data') 
+            .sort({ createdAt: -1 });
 
-        // This Regex ensures "gen-ai-master" matches even if it's "Gen-Ai-Master" in the DB
-        const query = { course: { $regex: new RegExp(`^${courseId}$`, 'i') } };
+        res.json({ success: true, materials });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Internal Directory Error" });
+    }
+};
 
+// --- 4. MULTI-BATCH SYNC AGGREGATOR (Student side) ---
+exports.syncMultiBatchLMS = async (req, res) => {
+    try {
+        const { batchIds } = req.body; 
+
+        if (!batchIds || !Array.isArray(batchIds)) {
+            return res.status(400).json({ success: false, message: "No streams authorized" });
+        }
+
+        // A. Resolve which unique courses these batches belong to
+        const activeBatches = await Batch.find({ _id: { $in: batchIds } });
+        const authorizedCourseSlugs = [...new Set(activeBatches.map(b => b.courseId.toLowerCase().trim()))];
+
+        // B. High-Performance Parallel Fetch
         const [lectures, materials] = await Promise.all([
-            Lecture.find(query).sort({ createdAt: -1 }),
-            Material.find(query).select('-file.data').sort({ createdAt: -1 })
+            // Lectures: Specific to the user's batch timings
+            Lecture.find({ batchId: { $in: batchIds }, isCancelled: false }).sort({ createdAt: -1 }),
+            
+            // Materials: Available to anyone enrolled in the Course, regardless of batch
+            Material.find({ course: { $in: authorizedCourseSlugs } })
+                    .select('-file.data')
+                    .sort({ createdAt: -1 })
         ]);
 
-        res.json({ success: true, data: { lectures, materials } });
+        res.json({
+            success: true,
+            data: { lectures, materials }
+        });
+    } catch (err) {
+        console.error("LMS_AGGREGATOR_ERROR:", err);
+        res.status(500).json({ success: false });
+    }
+};
+
+// --- 5. SECURE PDF STREAMING ---
+exports.downloadMaterial = async (req, res) => {
+    try {
+        const material = await Material.findById(req.params.id);
+        if (!material) return res.status(404).json({ message: "Resource not found" });
+
+        // Force browser to use secure inline viewer
+        res.set({
+            'Content-Type': material.file.contentType,
+            'Content-Disposition': 'inline', 
+            'Cache-Control': 'no-store'
+        });
+
+        res.send(material.file.data);
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Streaming failed" });
+    }
+};
+
+// --- 6. ADMIN FETCH ALL LECTURES ---
+exports.getAllLectures = async (req, res) => {
+    try {
+        const lectures = await Lecture.find().sort({ createdAt: -1 });
+        res.status(200).json({ success: true, lectures });
     } catch (err) {
         res.status(500).json({ success: false });
     }
 };
 
-exports.downloadMaterial = async (req, res) => {
-    try {
-        const material = await Material.findById(req.params.id);
-        if (!material) return res.status(404).json({ message: "File not found" });
-
-        // Set headers so the browser treats it as a file download
-        res.set({
-            'Content-Type': material.file.contentType,
-            'Content-Disposition': `attachment; filename="${material.file.fileName}"`,
-        });
-
-        res.send(material.file.data);
-    } catch (err) {
-        res.status(500).json({ success: false, message: "Download failed" });
-    }
-};
-
-exports.getAllLectures = async (req, res) => {
-    try {
-        // Fetch all, newest first. 
-        // We don't filter by course here because the Admin needs the full schedule.
-        const lectures = await Lecture.find().sort({ createdAt: -1 });
-        res.status(200).json({ success: true, lectures });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "Internal Server Error" });
-    }
-};
-
-// --- DELETE LECTURE ---
+// --- 7. DELETE OPERATIONS ---
 exports.deleteLecture = async (req, res) => {
     try {
-        const { id } = req.params;
-        const deletedLecture = await Lecture.findByIdAndDelete(id);
-
-        if (!deletedLecture) {
-            return res.status(404).json({ success: false, message: "Lecture not found" });
-        }
-
-        res.status(200).json({ success: true, message: "Lecture removed successfully" });
+        await Lecture.findByIdAndDelete(req.params.id);
+        res.status(200).json({ success: true, message: "Lecture removed" });
     } catch (err) {
-        res.status(500).json({ success: false, message: "Delete operation failed" });
+        res.status(500).json({ success: false });
+    }
+};
+
+exports.deleteMaterial = async (req, res) => {
+    try {
+        const material = await Material.findByIdAndDelete(req.params.id);
+        if (!material) return res.status(404).json({ success: false, message: "Not found" });
+        res.json({ success: true, message: "Resource wiped from Vault" });
+    } catch (err) {
+        res.status(500).json({ success: false });
     }
 };

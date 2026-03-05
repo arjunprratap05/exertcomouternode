@@ -1,7 +1,7 @@
 const Student = require('../models/student');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const { sendRegistrationEmail } = require('../services/mailService'); // 1. IMPORT YOUR MAILER
+const { sendRegistrationEmail } = require('../services/mailService');
 
 exports.handleRegistration = async (req, res) => {
     try {
@@ -10,84 +10,104 @@ exports.handleRegistration = async (req, res) => {
             highSchoolBoard, interBoard, course 
         } = req.body;
 
-        const highSchoolYear = parseInt(req.body.highSchoolYear);
-        const highSchoolPercent = parseFloat(req.body.highSchoolPercent);
-        const interYear = parseInt(req.body.interYear);
-        const interPercent = parseFloat(req.body.interPercent);
+        // 1. IDENTITY CHECK: Find existing student by Aadhaar (Identity Anchor)
+        let student = await Student.findOne({ aadhaarNo });
 
-        // 1. Check for existing student
-        const existingStudent = await Student.findOne({ 
-            $or: [{ email: email.toLowerCase() }, { aadhaarNo }] 
-        });
+        if (student) {
+            // SCENARIO A: Already registered for THIS specific course?
+            const alreadyEnrolled = student.enrollments.some(e => e.course === course);
+            
+            if (alreadyEnrolled) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: "You are already registered with this course using this Aadhaar Card." 
+                });
+            }
 
-        if (existingStudent) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Student with this Email or Aadhaar already registered." 
+            // SCENARIO B: Aadhaar match but NEW course (Secondary Enrollment)
+            // Push new course into the database array to keep BOTH records
+            student.enrollments.push({
+                course: course,
+                status: 'Applied',
+                enrolledAt: new Date()
+            });
+
+            // Update primary course field for backward compatibility/quick sync
+            student.course = course; 
+            
+            // Note: student.save() will now work because we removed 'next' from student.js model
+            await student.save();
+
+            // TRIGGER EMAIL SERVICE for returning student
+            await sendRegistrationEmail({
+                name: student.name,
+                email: student.email,
+                selectedCourse: course,
+                registrationId: student.registrationId,
+                rawPassword: "ALREADY_EXISTING", // Placeholder for mailer logic
+                isReturning: true
+            });
+
+            return res.status(201).json({
+                success: true,
+                isReturning: true,
+                registrationId: student.registrationId,
+                message: "New course enrollment added to your existing profile!"
             });
         }
 
-        // 2. Security: Auto-generate Password
+        // 2. NEW STUDENT SCENARIO (No Aadhaar Match)
+        // Check if email exists to avoid registrationID conflicts
+        const existingByEmail = await Student.findOne({ email: email.toLowerCase() });
+        if (existingByEmail) {
+            return res.status(400).json({ success: false, message: "This email is already linked to another Aadhaar." });
+        }
+
+        // 3. Security: Auto-generate Credentials for NEW human
         const rawPassword = crypto.randomBytes(4).toString('hex').toUpperCase(); 
         const hashedPassword = await bcrypt.hash(rawPassword, 12);
 
-        // 3. Create Student Object
+        // 4. Create New Human Record with initial Enrollment Array
         const newStudent = new Student({
-            name,
-            fatherName,
-            dob,
+            ...req.body,
             email: email.toLowerCase().trim(),
-            phone,
-            aadhaarNo,
-            address,
-            highSchoolBoard,
-            highSchoolYear,
-            highSchoolPercent,
-            interBoard,
-            interYear,
-            interPercent,
-            course,
             password: hashedPassword,
             registrationId: email.toLowerCase().trim(),
+            enrollments: [{ 
+                course: course, 
+                status: 'Applied' 
+            }],
             studentImage: req.file ? {
                 data: req.file.buffer,
                 contentType: req.file.mimetype
-            } : null, 
-            status: 'Applied'
+            } : null
         });
 
-        // 4. Save to MongoDB
         await newStudent.save();
 
-        // 5. TRIGGER EMAIL SERVICE (New Logic)
-        // We pass a combined object containing everything the mailer template needs
+        // 5. TRIGGER EMAIL SERVICE for new student
         await sendRegistrationEmail({
             name: newStudent.name,
             email: newStudent.email,
-            selectedCourse: newStudent.course,
+            selectedCourse: course,
             registrationId: newStudent.registrationId,
-            rawPassword: rawPassword, // Sending the unhashed password so student can see it
-            phone: newStudent.phone,
-            address: newStudent.address,
-            schoolBoard: newStudent.highSchoolBoard,
-            schoolYear: newStudent.highSchoolYear,
-            highestQualification: "High School / Intermediate",
-            universityName: newStudent.interBoard
+            rawPassword: rawPassword,
+            isReturning: false
         });
 
-        // 6. Success Response
         return res.status(201).json({
             success: true,
+            isReturning: false,
             registrationId: newStudent.registrationId,
             rawPassword: rawPassword, 
             message: "Registration Completed. Welcome email sent!"
         });
 
     } catch (error) {
-        console.error("Backend Error:", error);
+        console.error("Backend_Registration_Error:", error);
         return res.status(500).json({ 
             success: false, 
-            message: "Server Error: " + error.message 
+            message: "System Error: " + error.message 
         });
     }
 };
