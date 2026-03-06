@@ -38,3 +38,28 @@ exports.sendRegistrationEmail = async (data) => {
         throw new Error("Failed to send welcome email");
     }
 };
+
+exports.sendInquiryEmail = async (data) => {
+    const mailOptions = {
+        from: `"Expert Academy" <${process.env.EMAIL_USER}>`,
+        to: 'expertcomputeracademypatna@gmail.com', // Send the inquiry to your OWN email
+        subject: `New Inquiry from ${data.name}`,
+        html: `
+            <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #eee;">
+                <h2 style="color: #1A5F7A;">New Course Inquiry</h2>
+                <p><strong>Name:</strong> ${data.name}</p>
+                <p><strong>Phone:</strong> ${data.phone}</p>
+                <p><strong>Email:</strong> ${data.email}</p>
+                <p><strong>Message:</strong> ${data.message}</p>
+                <p><strong>Interested In:</strong> ${data.course || 'General Inquiry'}</p>
+            </div>
+        `
+    };
+
+    try {
+        return await transporter.sendMail(mailOptions);
+    } catch (error) {
+        console.error("Inquiry Mail Error:", error);
+        throw new Error("Failed to send inquiry notification");
+    }
+};
