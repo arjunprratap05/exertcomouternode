@@ -212,3 +212,24 @@ exports.deleteBatch = async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error during deletion" });
     }
 };
+
+exports.grantPortalAccess = async (req, res) => {
+    try {
+        const student = await Student.findById(req.params.id);
+        if (!student) return res.status(404).json({ success: false, message: "Student not found" });
+
+        student.isPortalActive = true; // Flips the switch
+        await student.save();
+
+        await AuditLog.create({
+            action: "Portal Access Activated",
+            performedBy: req.user?.username || "ADMIN",
+            targetName: student.name,
+            details: `Account enabled for ID: ${student.registrationId}`
+        });
+
+        res.json({ success: true, message: "Student portal activated" });
+    } catch (err) {
+        res.status(500).json({ success: false });
+    }
+};

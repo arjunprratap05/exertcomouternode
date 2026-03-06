@@ -31,25 +31,53 @@ const sendOTPEmail = async (email, otp) => {
 exports.studentLogin = async (req, res) => {
     try {
         const { registrationId, password } = req.body;
+        
+        // 1. Identity Search (Case-insensitive)
         const student = await Student.findOne({ 
             registrationId: { $regex: new RegExp(`^${registrationId.trim()}$`, 'i') } 
         });
 
-        if (!student) return res.status(401).json({ success: false, msg: "Invalid ID" });
-        
-        const isMatch = await bcrypt.compare(password, student.password);
-        if (!isMatch) return res.status(401).json({ success: false, msg: "Invalid Password" });
+        if (!student) return res.status(401).json({ success: false, msg: "Student Identity not found" });
 
-        // TOKEN MUST INCLUDE BATCHID
+        // 2. PORTAL GUARD: Check if Admin has flipped the "isPortalActive" switch
+        if (!student.isPortalActive) {
+            return res.status(403).json({ 
+                success: false, 
+                msg: "Portal Access Pending. Please contact the front office for activation." 
+            });
+        }
+        
+        // 3. Credential Verification
+        const isMatch = await bcrypt.compare(password, student.password);
+        if (!isMatch) return res.status(401).json({ success: false, msg: "Security Credentials Invalid" });
+
+        // 4. GENERATE SYNC-AWARE TOKEN
+        // We include 'activeBatches' (array) instead of just 'batchId' (single) 
+        // to support students enrolled in multiple programs.
         const token = jwt.sign(
-            { id: student._id, role: 'student', course: student.course, batchId: student.batchId }, 
+            { 
+                id: student._id, 
+                role: 'student', 
+                activeBatches: student.activeBatches || [], 
+                registrationId: student.registrationId 
+            }, 
             process.env.JWT_SECRET, 
             { expiresIn: '24h' }
         );
 
-        res.json({ success: true, token, student });
+        // Remove sensitive data before sending student object
+        const studentData = student.toObject();
+        delete studentData.password;
+
+        res.json({ 
+            success: true, 
+            token, 
+            student: studentData 
+        });
+
     } catch (error) {
-        res.status(500).json({ success: false, msg: "Server Error" });
+        console.error("Login_System_Failure:", error);
+        res.status(500).json({ success: false, msg: "Server Security Failure" });
     }
 };
 

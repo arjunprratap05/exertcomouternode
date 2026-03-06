@@ -20,4 +20,6 @@ router.get('/batches/active', authMiddleware, adminController.getActiveBatches);
 
 router.delete('/batches/:id', authMiddleware, adminController.deleteBatch);
 
+router.patch('/registrations/:id/grant-access', authMiddleware, adminController.grantPortalAccess);
+
 module.exports = router;
