@@ -38,7 +38,7 @@ exports.updateStudentPayment = async (req, res) => {
 
         await AuditLog.create({
             action: "Payment Updated",
-            performedBy: req.user?.role?.toUpperCase() || "ACCOUNTS", // Changed req.admin to req.user
+            performedBy: req.user?.role?.toUpperCase(), // Changed req.admin to req.user
             targetName: student.name,
             details: `Received ₹${paymentLog?.amount || 0} via ${paymentLog?.mode || 'N/A'}`
         });
@@ -57,7 +57,7 @@ exports.updateEnquiryStatus = async (req, res) => {
 
         await AuditLog.create({
             action: enrolled ? "Lead Conversion" : "Lead Rejected",
-            performedBy: req.user?.role?.toUpperCase() || "FRONTOFFICE", // Changed req.admin to req.user
+            performedBy: req.user?.role?.toUpperCase(), // Changed req.admin to req.user
             targetName: inquiry.name,
             details: enrolled ? "Converted to student" : `Reason: ${reason || 'N/A'}`
         });
@@ -119,7 +119,7 @@ exports.approveStudent = async (req, res) => {
         // --- AUDIT LOG ---
         await AuditLog.create({
             action: "Multi-Stream Authorization",
-            performedBy: req.user?.username || "ADMIN",
+            performedBy: req.user?.username,
             targetName: student.name,
             details: `Authorized Streams: ${batchIds.length}`
         });
@@ -202,7 +202,7 @@ exports.deleteBatch = async (req, res) => {
         // Optional: Add to Audit Log
         await AuditLog.create({
             action: "Batch Deleted",
-            performedBy: req.user?.username || "ADMIN",
+            performedBy: req.user?.username,
             targetName: deletedBatch.batchCode,
             details: `Deleted by ${req.user?.username}`
         });
@@ -223,7 +223,7 @@ exports.grantPortalAccess = async (req, res) => {
 
         await AuditLog.create({
             action: "Portal Access Activated",
-            performedBy: req.user?.username || "ADMIN",
+            performedBy: req.user?.username,
             targetName: student.name,
             details: `Account enabled for ID: ${student.registrationId}`
         });
