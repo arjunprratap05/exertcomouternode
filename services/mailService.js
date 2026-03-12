@@ -41,17 +41,20 @@ exports.sendRegistrationEmail = async (data) => {
 
 exports.sendInquiryEmail = async (data) => {
     const mailOptions = {
-        from: `"Expert Academy" <${process.env.EMAIL_USER}>`,
-        to: 'expertcomputeracademypatna@gmail.com', // Send the inquiry to your OWN email
-        subject: `New Inquiry from ${data.name}`,
+        from: `"Expert Academy Leads" <${process.env.EMAIL_USER}>`,
+        to: 'expertcomputeracademypatna@gmail.com', // YOUR TARGET EMAIL
+        subject: `[${data.source.toUpperCase()}] New Lead: ${data.name}`,
         html: `
-            <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #eee;">
-                <h2 style="color: #1A5F7A;">New Course Inquiry</h2>
+            <div style="font-family: sans-serif; border: 2px solid #1A5F7A; padding: 25px; border-radius: 15px;">
+                <h2 style="color: #F37021; border-bottom: 1px solid #eee; padding-bottom: 10px;">${data.source} Lead Captured</h2>
                 <p><strong>Name:</strong> ${data.name}</p>
                 <p><strong>Phone:</strong> ${data.phone}</p>
                 <p><strong>Email:</strong> ${data.email}</p>
-                <p><strong>Message:</strong> ${data.message}</p>
-                <p><strong>Interested In:</strong> ${data.course || 'General Inquiry'}</p>
+                <p><strong>Course of Interest:</strong> ${data.course}</p>
+                <p><strong>User Message:</strong> ${data.message || 'N/A'}</p>
+                <div style="margin-top: 20px; padding: 10px; background: #f9f9f9; font-size: 11px;">
+                    Generated on: ${new Date(data.createdAt).toLocaleString()}
+                </div>
             </div>
         `
     };
@@ -60,6 +63,6 @@ exports.sendInquiryEmail = async (data) => {
         return await transporter.sendMail(mailOptions);
     } catch (error) {
         console.error("Inquiry Mail Error:", error);
-        throw new Error("Failed to send inquiry notification");
+        throw new Error("Failed to send notification email");
     }
 };

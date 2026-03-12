@@ -1,39 +1,88 @@
 const { techCoursesData, universityPrograms } = require('../data/course');
+const Inquiry = require('../models/Inquiry'); 
+const { sendInquiryEmail } = require('../services/mailService');
 
-exports.getBotReply = async (userMsg) => {
-    const msg = userMsg.toLowerCase().trim();
+exports.getBotReply = async (userMsg, sessionData = {}) => {
+    const msg = userMsg.trim(); // Keep case for Name
+    const msgLower = msg.toLowerCase();
     const allCourses = [...techCoursesData, ...universityPrograms];
+    
+    // --- 1. LEAD COLLECTION STATE MACHINE ---
+    
+    // STEP 3: Handle Phone (The final step)
+    const phoneRegex = /[6-9]\d{9}/; 
+    if (phoneRegex.test(msg) && sessionData.collectingLead && sessionData.tempEmail) {
+        const capturedPhone = msg.match(phoneRegex)[0];
+        try {
+            const newLead = await Inquiry.create({
+                name: sessionData.tempName || "AI Lead",
+                email: sessionData.tempEmail,
+                phone: capturedPhone,
+                course: sessionData.lastInteractedCourse || "General Inquiry",
+                source: "AI Chatbot"
+            });
+            
+            await sendInquiryEmail(newLead);
+            
+            const finalName = sessionData.tempName;
+            // CLEAN SESSION
+            delete sessionData.collectingLead;
+            delete sessionData.tempName;
+            delete sessionData.tempEmail;
 
-    // 1. Handover Triggers (Keywords + Affirmative responses)
-    const affirmative = ["yes", "yeah", "ok", "okay", "yep", "sure", "connect", "talk", "human", "executive"];
-    if (affirmative.some(key => msg === key || msg.includes(key))) {
-        return "HANDOVER_TRIGGER";
+            return `Done, ${finalName}! 🎓 I've synced your profile with our counselor. They will call you on ${capturedPhone} shortly and send the syllabus to ${newLead.email}.`;
+        } catch (err) { 
+            return "Details noted! Our counselor will reach out to you on this number shortly."; 
+        }
     }
 
-    // 2. Intelligent Course Matcher
+    // STEP 2: Handle Email (With strict validation)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (sessionData.collectingLead && sessionData.tempName && !sessionData.tempEmail) {
+        if (emailRegex.test(msgLower)) {
+            sessionData.tempEmail = msgLower;
+            return "Excellent. Finally, what is your **10-digit Mobile Number**? (Required to verify your ID for the lab demo).";
+        } else {
+            return "That doesn't look like a valid email. Please enter a proper **Email ID** (e.g., name@example.com) so I can send you the course details.";
+        }
+    }
+
+    // STEP 1: Handle Name
+    if (sessionData.collectingLead && !sessionData.tempName) {
+        // Validation: Name should be at least 2 words or 3 characters
+        if (msg.length < 3) return "Please provide your **Full Name** to continue.";
+        
+        sessionData.tempName = msg;
+        return `Nice to meet you, ${msg}! 📧 What is your **Email Address**? (I'll send the syllabus and fee structure there)`;
+    }
+
+    // --- 2. TRIGGERS & HANDOVER ---
+
+    // Handover Initiation
+    if (["yes", "yeah", "talk to human", "executive", "whatsapp", "call", "counselor", "connect"].some(key => msgLower.includes(key))) {
+        sessionData.collectingLead = true;
+        return "I'd be happy to connect you! First, what is your **Full Name**?";
+    }
+
+    // --- 3. KNOWLEDGE BASE & COURSE MATCHING ---
+
+    // Location
+    if (msgLower.includes("where") || msgLower.includes("location") || msgLower.includes("address") || msgLower.includes("patna")) {
+        return "Expert Computer Academy is located near Alpana Market, Patliputra, Patna. We have been the city's legacy IT training center since 1987. \n\n📍 Would you like to know our lab timings or specific course details?";
+    }
+
+    // Course Matching
     const matched = allCourses.find(c => 
-        msg.includes(c.id.toLowerCase()) || 
-        c.title.toLowerCase().split(' ').some(word => word.length > 3 && msg.includes(word))
+        msgLower.includes(c.id.toLowerCase()) || 
+        c.title.toLowerCase().split(' ').some(word => word.length > 3 && msgLower.includes(word))
     );
 
     if (matched) {
+        sessionData.lastInteractedCourse = matched.title; 
         const fee = Number(matched.fee).toLocaleString('en-IN');
-        return `Regarding **${matched.title}**:
-        \n• **Exact Fee:** ₹${fee}
-        \n• **Curriculum:** ${matched.modules.slice(0, 4).join(", ")}...
-        \n\nWould you like me to connect you with our admission counselor for batch timings?`;
+        return `Expert AI: The **${matched.title}** program is a great choice! \n💰 **Fee:** ₹${fee} \n\nWould you like me to connect you with our counselor for batch timings?`;
     }
 
-    // 3. Fallback logic
-    if (msg.includes("price") || msg.includes("fee")) {
-        return "Fees range from ₹3,000 to ₹46,500. Which specific course are you interested in? (e.g., ADCA, Tally, Java, or Python)";
-    }
-
-    return "I am the Expert AI. I can give you exact fees and syllabus for any course. Which one would you like to know about?";
-};
-
-exports.generateSecureLink = (agentId) => {
-    const phones = { "counselor_1": process.env.AGENT_1_PHONE, "counselor_2": process.env.AGENT_2_PHONE };
-    const target = phones[agentId] || process.env.AGENT_1_PHONE;
-    return `https://wa.me/${target}?text=I was just chatting with the Expert AI and I want to enroll in a course.`;
+    // Fallback
+    return "I am the Expert Academy AI Counselor. I can assist with syllabus, fees, and career paths. Which course are you interested in today? (e.g. ADCA, Java, Python, or BCA)";
 };

@@ -1,24 +1,23 @@
 const Inquiry = require('../models/Inquiry');
 const { sendInquiryEmail } = require('../services/mailService');
 
-exports.submitInquiry = async (req, res) => {
+// Ensure this matches 'processNewLead'
+exports.processNewLead = async (req, res) => {
     try {
-        const { name, email, phone, message, course } = req.body;
+        const { name, email, phone, message, course, source = 'Website' } = req.body;
         
-        // 1. Save to MongoDB first
-        const newInquiry = new Inquiry({ name, email, phone, course, message });
+        const newInquiry = new Inquiry({ name, email, phone, course, message, source });
         await newInquiry.save();
 
-        // 2. Attempt Email (wrapped so saving doesn't fail if email does)
         try {
-            await sendInquiryEmail({ name, email, phone, message, course });
+            await sendInquiryEmail(newInquiry);
         } catch (mailErr) {
-            console.warn("Mail failed, but data was saved:", mailErr.message);
+            console.warn("Mail failed, but lead saved.");
         }
         
-        res.status(200).json({ success: true, message: "Inquiry received. We will contact you shortly." });
+        res.status(200).json({ success: true, message: "Inquiry captured successfully." });
     } catch (error) {
-        console.error("CRITICAL SUBMISSION ERROR:", error.message);
-        res.status(500).json({ success: false, message: "Server encountered a database error." });
+        console.error("Controller Error:", error.message);
+        res.status(500).json({ success: false, message: "Server error." });
     }
 };
