@@ -64,7 +64,7 @@ app.get('/', (req, res) => {
 
 // --- 6. GLOBAL ERROR HANDLER ---
 app.use((err, req, res, next) => {
-    // Log specific details in Dev, generic message in Prod
+    
     console.error(`[Error]: ${err.message}`);
     res.status(err.status || 500).json({ 
         success: false, 
