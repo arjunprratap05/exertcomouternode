@@ -1,5 +1,5 @@
 const Coupon = require('../models/Coupon');
-const Student = require('../models/Student'); // Ensure path is correct
+const Student = require('../models/student'); // Ensure path is correct
 
 // 1. Create Coupon (Merged Payload)
 exports.createCoupon = async (req, res) => {
