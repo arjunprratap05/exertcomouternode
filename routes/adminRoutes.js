@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
-const { authMiddleware } = require('../middleware/authMiddleware');
+const couponController = require('../controllers/couponController');
+const { authMiddleware, authorize } = require('../middleware/authMiddleware');
 
 router.post('/login', adminController.adminLogin);
 
@@ -21,5 +22,15 @@ router.get('/batches/active', authMiddleware, adminController.getActiveBatches);
 router.delete('/batches/:id', authMiddleware, adminController.deleteBatch);
 
 router.patch('/registrations/:id/grant-access', authMiddleware, adminController.grantPortalAccess);
+
+router.post('/coupons', authMiddleware, authorize('founder', 'accounts'), couponController.createCoupon);
+router.get('/coupons', authMiddleware, authorize('founder', 'accounts'), couponController.getAllCoupons);
+router.delete('/coupons/:id', authMiddleware, authorize('founder'), couponController.deleteCoupon);
+
+// Public Validation (For Checkout Form)
+
+router.get('/coupons/history', authMiddleware, couponController.getCouponHistory);
+
+router.post('/coupons/validate', couponController.validateCoupon);
 
 module.exports = router;

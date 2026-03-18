@@ -29,4 +29,4 @@ const studentSchema = new mongoose.Schema({
     studentImage: { data: Buffer, contentType: String }
 }, { timestamps: true });
 
-module.exports = mongoose.model('Student', studentSchema);
+module.exports = mongoose.models.Student || mongoose.model('Student', studentSchema);
