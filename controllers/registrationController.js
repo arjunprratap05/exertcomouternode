@@ -1,4 +1,4 @@
-const Student = require('../models/Student');
+const Student = require('../models/student');
 const Coupon = require('../models/Coupon');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
