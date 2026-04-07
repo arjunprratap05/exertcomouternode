@@ -8,4 +8,6 @@ router.post('/submit', inquiryController.processNewLead);
 router.get('/fb-webhook', fbController.verifyWebhook);
 router.post('/fb-webhook', fbController.handleLeadWebhook);
 
+router.patch('/:id', inquiryController.updateEnquiry);
+
 module.exports = router;
