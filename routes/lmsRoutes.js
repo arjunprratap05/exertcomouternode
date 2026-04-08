@@ -25,4 +25,6 @@ router.delete('/delete-material/:id', authMiddleware, staffAccess, lmsController
 router.get('/download/:id', authMiddleware, lmsController.downloadMaterial);
 router.post('/sync-multi', authMiddleware, lmsController.syncMultiBatchLMS);
 
+router.get('/add-lecture', authMiddleware, lmsController.getAllLectures);
+
 module.exports = router;

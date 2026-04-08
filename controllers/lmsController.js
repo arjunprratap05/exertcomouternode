@@ -6,9 +6,16 @@ const Batch = require('../models/Batch');
 // --- 1. ADD LECTURE (Linked to Batch) ---
 exports.addLecture = async (req, res) => {
     try {
-        const lecture = new Lecture(req.body);
+        let lecture = new Lecture(req.body);
         await lecture.save();
-        res.status(201).json({ success: true, message: "Lecture synced to Batch" });
+        
+        lecture = await Lecture.findById(lecture._id).populate('batchId', 'batchCode');
+        
+        res.status(201).json({ 
+            success: true, 
+            message: "Lecture live on Student Portal", 
+            data: lecture 
+        });
     } catch (err) { 
         res.status(400).json({ success: false, message: err.message }); 
     }
@@ -19,8 +26,6 @@ exports.addMaterial = async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ success: false, message: "PDF file missing" });
         
-        // We link material to the 'course' slug/ID (e.g., 'java-pro') 
-        // instead of a specific Batch ID to avoid multiple uploads.
         const material = new Material({
             title: req.body.title,
             course: req.body.course.toLowerCase().trim(),
@@ -42,7 +47,6 @@ exports.addMaterial = async (req, res) => {
 // --- 3. GET ALL MATERIALS (Admin side) ---
 exports.getAllMaterials = async (req, res) => {
     try {
-        // Optimization: Do NOT send binary file data in a list view
         const materials = await Material.find()
             .select('-file.data') 
             .sort({ createdAt: -1 });
@@ -109,13 +113,14 @@ exports.downloadMaterial = async (req, res) => {
 // --- 6. ADMIN FETCH ALL LECTURES ---
 exports.getAllLectures = async (req, res) => {
     try {
-        const lectures = await Lecture.find().sort({ createdAt: -1 });
-        res.status(200).json({ success: true, lectures });
+        const lectures = await Lecture.find()
+            .populate('batchId', 'batchCode startTime') // This fills the "No Title" gaps
+            .sort({ createdAt: -1 });
+        res.json({ success: true, data: lectures });
     } catch (err) {
-        res.status(500).json({ success: false });
+        res.status(500).json({ success: false, message: err.message });
     }
 };
-
 // --- 7. DELETE OPERATIONS ---
 exports.deleteLecture = async (req, res) => {
     try {
