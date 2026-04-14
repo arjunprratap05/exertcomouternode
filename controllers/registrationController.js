@@ -2,24 +2,22 @@ const Student = require('../models/student');
 const Coupon = require('../models/Coupon');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const { sendRegistrationEmail } = require('../services/mailService');
 
 exports.handleRegistration = async (req, res) => {
     try {
-        const { email, aadhaarNo, course, totalFee, appliedCoupon } = req.body;
+        const { name, email, aadhaarNo, course, totalFee, appliedCoupon } = req.body;
         
-        // This variable will hold what we eventually save to 'totalFee' in DB
         let finalPayableAmount = Number(totalFee); 
         let couponData = null;
 
-        // --- CASE 1: COUPON APPLIED ---
+        // 1. COUPON VERIFICATION
         if (appliedCoupon) {
             try {
-                couponData = JSON.parse(appliedCoupon);
-                
-                // Atomic check and increment
+                const parsedCoupon = JSON.parse(appliedCoupon);
                 const updatedCoupon = await Coupon.findOneAndUpdate(
                     { 
-                        code: couponData.code.toUpperCase(), 
+                        code: parsedCoupon.code.toUpperCase(), 
                         isActive: true,
                         $expr: { $lt: ["$usedCount", "$maxUsage"] } 
                     },
@@ -30,43 +28,49 @@ exports.handleRegistration = async (req, res) => {
                 if (!updatedCoupon) {
                     return res.status(400).json({ 
                         success: false, 
-                        message: "Coupon invalid or limit reached. Please register without a coupon or use a different one." 
+                        message: "Coupon invalid or limit reached." 
                     });
                 }
-                // The amount sent from frontend (discounted) is used
-                finalPayableAmount = Number(totalFee); 
+                couponData = {
+                    code: updatedCoupon.code,
+                    discountValue: updatedCoupon.discountValue
+                };
             } catch (e) {
                 console.error("Coupon Parsing Error:", e);
             }
-        } 
-        
-        // --- CASE 2: NO COUPON ---
-        // If appliedCoupon is null/undefined, finalPayableAmount remains 
-        // the original course price sent via 'totalFee' from the frontend.
+        }
 
-        // 1. Identity Check (Aadhaar is unique anchor)
+        // 2. CHECK IF STUDENT EXISTS
         let student = await Student.findOne({ aadhaarNo });
 
         if (student) {
-            // Returning Student Logic
+            // RETURNING STUDENT LOGIC
             const alreadyEnrolled = student.enrollments.some(e => e.course === course);
             if (alreadyEnrolled) {
                 return res.status(400).json({ success: false, message: "Already registered for this course." });
             }
 
             student.enrollments.push({ course, enrolledAt: new Date(), status: 'Applied' });
-            
-            // Add the new amount to the cumulative totalFee
             student.totalFee += finalPayableAmount; 
             
-            if (couponData) {
-                student.appliedCoupon = {
-                    code: couponData.code,
-                    discountValue: couponData.discountValue
-                };
-            }
+            if (couponData) student.appliedCoupon = couponData;
 
             await student.save();
+
+            // TRIGGER MAIL
+            try {
+                await sendRegistrationEmail({
+                    email: student.email,
+                    name: student.name,
+                    selectedCourse: course,
+                    registrationId: student.registrationId,
+                    isReturning: true
+                });
+            } catch (mailErr) {
+                console.error("Mail sending failed for returning student:", mailErr);
+                // We don't return error here because DB save was successful
+            }
+
             return res.status(201).json({ 
                 success: true, 
                 isReturning: true, 
@@ -74,23 +78,38 @@ exports.handleRegistration = async (req, res) => {
             });
         }
 
-        // 2. New Student Logic
+        // 3. NEW STUDENT LOGIC
         const rawPassword = crypto.randomBytes(4).toString('hex').toUpperCase();
         const hashedPassword = await bcrypt.hash(rawPassword, 12);
+        const normalizedEmail = email.toLowerCase().trim();
 
         const newStudent = new Student({
             ...req.body,
-            email: email.toLowerCase().trim(),
+            email: normalizedEmail,
             password: hashedPassword,
-            registrationId: email.toLowerCase().trim(),
-            totalFee: finalPayableAmount, // STORES CASE 1 or CASE 2 amount
+            registrationId: normalizedEmail, 
+            totalFee: finalPayableAmount,
             appliedCoupon: couponData,
             enrollments: [{ course, status: 'Applied' }]
         });
 
         await newStudent.save();
-        
-        res.status(201).json({ 
+
+        // TRIGGER MAIL
+        try {
+            await sendRegistrationEmail({
+                email: normalizedEmail,
+                name: name,
+                selectedCourse: course,
+                registrationId: normalizedEmail,
+                rawPassword: rawPassword,
+                isReturning: false
+            });
+        } catch (mailErr) {
+            console.error("Mail sending failed for new student:", mailErr);
+        }
+
+        return res.status(201).json({ 
             success: true, 
             isReturning: false, 
             registrationId: newStudent.registrationId, 
@@ -99,6 +118,6 @@ exports.handleRegistration = async (req, res) => {
 
     } catch (error) {
         console.error("REGISTRATION_FLOW_ERROR:", error);
-        res.status(500).json({ success: false, message: "Server Error: " + error.message });
+        res.status(500).json({ success: false, message: "Internal Server Error" });
     }
 };

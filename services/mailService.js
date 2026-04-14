@@ -42,7 +42,7 @@ exports.sendRegistrationEmail = async (data) => {
 exports.sendInquiryEmail = async (data) => {
     const mailOptions = {
         from: `"Expert Academy Leads" <${process.env.EMAIL_USER}>`,
-        to: 'expertcomputeracademypatna@gmail.com', // YOUR TARGET EMAIL
+        to: EMAIL_USER, // YOUR TARGET EMAIL
         subject: `[${data.source.toUpperCase()}] New Lead: ${data.name}`,
         html: `
             <div style="font-family: sans-serif; border: 2px solid #1A5F7A; padding: 25px; border-radius: 15px;">
