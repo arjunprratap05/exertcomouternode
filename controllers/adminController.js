@@ -233,3 +233,49 @@ exports.grantPortalAccess = async (req, res) => {
         res.status(500).json({ success: false });
     }
 };
+
+exports.updateLedger = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { amountPaid, totalFee, auditAction, targetName } = req.body;
+        
+        const updateData = {};
+        if (amountPaid !== undefined) updateData.amountPaid = amountPaid;
+        if (totalFee !== undefined) updateData.totalFee = totalFee;
+
+        const updatedStudent = await Student.findByIdAndUpdate(
+            id,
+            { $set: updateData },
+            { new: true }
+        );
+
+        if (!updatedStudent) {
+            return res.status(404).json({ success: false, message: "Student not found" });
+        }
+
+        // --- FIXED LOGIC START ---
+        // 1. Get the name or fallback to the Role (Founder/Accounts)
+        // 2. We capitalize the first letter to make it look professional in the dashboard
+        const userRole = req.user.role ? req.user.role.charAt(0).toUpperCase() + req.user.role.slice(1) : "Admin";
+        const adminIdentifier = req.user.name || userRole;
+
+        const newLog = new AuditLog({
+            performedBy: adminIdentifier, // This will now show "Founder" or "Accounts"
+            action: auditAction || "Ledger Updated",
+            targetName: targetName || updatedStudent.name,
+            timestamp: new Date()
+        });
+        // --- FIXED LOGIC END ---
+
+        await newLog.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Ledger synchronized successfully",
+            data: updatedStudent
+        });
+    } catch (error) {
+        console.error("Ledger Update Error:", error);
+        res.status(500).json({ success: false, message: "Server Error during sync" });
+    }
+};

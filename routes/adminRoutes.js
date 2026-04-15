@@ -33,4 +33,6 @@ router.get('/coupons/history', authMiddleware, couponController.getCouponHistory
 
 router.post('/coupons/validate', couponController.validateCoupon);
 
+router.patch('/registrations/:id/update-ledger', authMiddleware, adminController.updateLedger);
+
 module.exports = router;
