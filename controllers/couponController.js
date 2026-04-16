@@ -4,11 +4,61 @@ const Student = require('../models/student'); // Ensure path is correct
 // 1. Create Coupon (Merged Payload)
 exports.createCoupon = async (req, res) => {
     try {
-        const coupon = await Coupon.create(req.body);
-        res.status(201).json({ success: true, data: coupon });
+        // 1. Extract and Sanitize Data
+        const couponData = { ...req.body };
+
+        // 2. Handle the "FLAT" vs "FIXED" mismatch
+        // If frontend sends 'FLAT', map it to 'FIXED' to satisfy Mongoose Enum
+        if (couponData.discountType === 'FLAT') {
+            couponData.discountType = 'FIXED';
+        }
+
+        // 3. Ensure code is Uppercase and Trimmed
+        if (couponData.code) {
+            couponData.code = couponData.code.toUpperCase().trim();
+        }
+
+        // 4. Manual check for Duplicate (optional, but good for custom logging)
+        const existing = await Coupon.findOne({ code: couponData.code });
+        if (existing) {
+            return res.status(400).json({ 
+                success: false, 
+                message: `The coupon code "${couponData.code}" is already in use.` 
+            });
+        }
+
+        // 5. Create the Coupon
+        const coupon = await Coupon.create(couponData);
+
+        res.status(201).json({ 
+            success: true, 
+            message: "Coupon deployed successfully",
+            data: coupon 
+        });
+
     } catch (error) {
-        if (error.code === 11000) return res.status(400).json({ success: false, message: "Code already exists" });
-        res.status(400).json({ success: false, message: error.message });
+        console.error("Coupon Creation Error:", error);
+        
+        // Handle Mongoose Unique Index Error (Code 11000)
+        if (error.code === 11000) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Deployment Failed: This code already exists in the registry." 
+            });
+        }
+
+        // Handle Enum validation errors (like the one you just had)
+        if (error.name === 'ValidationError') {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Schema Validation Failed: Please check discount type or mandatory fields." 
+            });
+        }
+
+        res.status(500).json({ 
+            success: false, 
+            message: "Internal Server Error during deployment." 
+        });
     }
 };
 
