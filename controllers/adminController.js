@@ -279,3 +279,72 @@ exports.updateLedger = async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error during sync" });
     }
 };
+
+exports.requestDiscount = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { amount, reason, targetName } = req.body;
+
+        const student = await Student.findByIdAndUpdate(
+            id,
+            {
+                discountRequest: {
+                    amount: Number(amount),
+                    reason: reason,
+                    status: 'PENDING',
+                    requestedAt: new Date()
+                }
+            },
+            { new: true }
+        );
+
+        // Log the request in the Audit system
+        await AuditLog.create({
+            performedBy: req.user.role.toUpperCase(),
+            action: `Discount Requested: ₹${amount}`,
+            targetName: targetName || student.name,
+            timestamp: new Date()
+        });
+
+        res.status(200).json({ success: true, message: "Request sent to Founder" });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// ACTION: Founder Approves and actually changes the Total Fee
+exports.approveDiscount = async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        // Security Check: Ensure only Founder can call this
+        if (req.user.role !== 'founder') {
+            return res.status(403).json({ success: false, message: "Founder clearance required" });
+        }
+
+        const student = await Student.findById(id);
+        if (!student || student.discountRequest.status !== 'PENDING') {
+            return res.status(400).json({ success: false, message: "No pending request found" });
+        }
+
+        const discountValue = student.discountRequest.amount;
+
+        // Apply financial change: Deduct from totalFee
+        student.totalFee -= discountValue;
+        student.discountRequest.status = 'APPROVED';
+        
+        await student.save();
+
+        // Log the final authorization
+        await AuditLog.create({
+            performedBy: "FOUNDER",
+            action: `Discount Authorized: -₹${discountValue}`,
+            targetName: student.name,
+            timestamp: new Date()
+        });
+
+        res.status(200).json({ success: true, message: "Discount applied to ledger" });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};

@@ -35,4 +35,18 @@ router.post('/coupons/validate', couponController.validateCoupon);
 
 router.patch('/registrations/:id/update-ledger', authMiddleware, adminController.updateLedger);
 
+router.patch(
+    '/registrations/:id/request-discount', 
+    authMiddleware, 
+    adminController.requestDiscount
+);
+
+// Route for Founder to finalize (Limited to Founder role only)
+router.patch(
+    '/registrations/:id/approve-discount', 
+    authMiddleware, 
+    authorize('founder'), 
+    adminController.approveDiscount
+);
+
 module.exports = router;

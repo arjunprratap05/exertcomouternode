@@ -15,8 +15,23 @@ const studentSchema = new mongoose.Schema({
     }],
     course: { type: String }, 
     activeBatches: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Batch' }],
-    totalFee: { type: Number, default: 0 }, // Stores final discounted price
+    
+    // --- FINANCIAL LEDGER ---
+    totalFee: { type: Number, default: 0 }, 
     amountPaid: { type: Number, default: 0 },
+    
+    // --- NEW: DUAL-STAGE DISCOUNT LOGIC ---
+    discountRequest: {
+        amount: { type: Number, default: 0 },
+        reason: { type: String },
+        status: { 
+            type: String, 
+            enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED'], 
+            default: 'NONE' 
+        },
+        requestedAt: { type: Date }
+    },
+
     appliedCoupon: {
         code: { type: String },
         discountValue: { type: Number }
