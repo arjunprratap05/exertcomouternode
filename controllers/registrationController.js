@@ -13,36 +13,36 @@ exports.handleRegistration = async (req, res) => {
             appliedCoupon, paymentOption, transactionId, emiInterval 
         } = req.body;
 
-        // 1. DATA SANITIZATION (Fixes the NaN Error)
-        let finalFee = Number(totalFee);
-        if (isNaN(finalFee)) finalFee = 0;
-
-        // 2. TRANSACTION ID / CASH SEQUENCE LOGIC
+        // 1. DATA SANITIZATION
+        let finalFee = Number(totalFee) || 0;
         let finalTransactionId = transactionId;
+        const normalizedEmail = email.toLowerCase().trim();
 
+        // 2. TRANSACTION ID LOGIC
         if (paymentOption === 'CASH') {
             const fy = getFinancialYearSequence();
-            // Increment sequence in DB atomically to prevent duplicates
             const counter = await Counter.findOneAndUpdate(
                 { id: fy.dbKey },
                 { $inc: { seq: 1 } },
                 { new: true, upsert: true }
             );
-            const sequenceNum = counter.seq.toString().padStart(3, '0');
-            finalTransactionId = `ECA/CASH/${fy.label}/${sequenceNum}`;
+            finalTransactionId = `ECA/CASH/${fy.label}/${counter.seq.toString().padStart(3, '0')}`;
         } else {
-            // Check for duplicate UTR for Online Payments
-            const existingUTR = await Student.findOne({ transactionId: finalTransactionId });
+            // GLOBAL UTR CHECK (Ensures UTR is unique across all students and all courses)
+            const existingUTR = await Student.findOne({ "enrollments.transactionId": finalTransactionId });
             if (existingUTR) {
-                return res.status(400).json({ success: false, message: "This Transaction ID has already been used." });
+                return res.status(400).json({ 
+                    success: false, 
+                    message: "This Transaction ID has already been used for another course." 
+                });
             }
         }
 
-        // 3. COUPON VERIFICATION
+        // 3. COUPON VERIFICATION (Atomic Update)
         let couponData = null;
         if (appliedCoupon) {
             try {
-                const parsedCoupon = JSON.parse(appliedCoupon);
+                const parsedCoupon = typeof appliedCoupon === 'string' ? JSON.parse(appliedCoupon) : appliedCoupon;
                 const updatedCoupon = await Coupon.findOneAndUpdate(
                     { 
                         code: parsedCoupon.code.toUpperCase(), 
@@ -52,39 +52,37 @@ exports.handleRegistration = async (req, res) => {
                     { $inc: { usedCount: 1 } },
                     { new: true }
                 );
-
                 if (updatedCoupon) {
-                    couponData = {
-                        code: updatedCoupon.code,
-                        discountValue: updatedCoupon.discountValue
-                    };
+                    couponData = { code: updatedCoupon.code, discountValue: updatedCoupon.discountValue };
                 }
-            } catch (e) { console.error("Coupon Parsing Error:", e); }
+            } catch (e) { console.error("Coupon Processing Error:", e); }
         }
 
-        // 4. CHECK IF STUDENT EXISTS
+        // 4. FIND STUDENT BY AADHAAR
         let student = await Student.findOne({ aadhaarNo });
-        const rawPassword = crypto.randomBytes(4).toString('hex').toUpperCase();
-        const hashedPassword = await bcrypt.hash(rawPassword, 12);
-        const normalizedEmail = email.toLowerCase().trim();
 
         if (student) {
-            // RETURNING STUDENT LOGIC
+            // --- RETURNING STUDENT LOGIC ---
             const alreadyEnrolled = student.enrollments.some(e => e.course === course);
             if (alreadyEnrolled) {
-                return res.status(400).json({ success: false, message: "Already registered for this course." });
+                return res.status(400).json({ success: false, message: "You are already registered for this course." });
             }
 
-            student.enrollments.push({ course, enrolledAt: new Date(), status: 'Applied' });
-            student.totalFee += finalFee; 
-            student.paymentOption = paymentOption;
-            student.transactionId = finalTransactionId;
-            student.emiMonths = emiInterval || 1;
-            
-            if (couponData) student.appliedCoupon = couponData;
+            // Push New Enrollment Object
+            const newEnrollment = {
+                course,
+                courseFee: finalFee,
+                paymentOption,
+                transactionId: finalTransactionId,
+                emiMonths: emiInterval || 1,
+                appliedCoupon: couponData,
+                status: 'Applied'
+            };
+
+            student.enrollments.push(newEnrollment);
             await student.save();
 
-            // TRIGGER MAIL
+            // Notify via Mail
             try {
                 await sendRegistrationEmail({
                     email: student.email,
@@ -104,23 +102,29 @@ exports.handleRegistration = async (req, res) => {
             });
         }
 
-        // 5. NEW STUDENT LOGIC
+        // --- NEW STUDENT LOGIC ---
+        const rawPassword = crypto.randomBytes(4).toString('hex').toUpperCase();
+        const hashedPassword = await bcrypt.hash(rawPassword, 12);
+
         const newStudent = new Student({
             ...req.body,
             email: normalizedEmail,
             password: hashedPassword,
             registrationId: normalizedEmail, 
-            totalFee: finalFee,
-            appliedCoupon: couponData,
-            paymentOption,
-            transactionId: finalTransactionId,
-            emiMonths: emiInterval || 1,
-            enrollments: [{ course, status: 'Applied' }]
+            enrollments: [{
+                course,
+                courseFee: finalFee,
+                paymentOption,
+                transactionId: finalTransactionId,
+                emiMonths: emiInterval || 1,
+                appliedCoupon: couponData,
+                status: 'Applied'
+            }]
         });
 
         await newStudent.save();
 
-        // TRIGGER MAIL
+        // Notify via Mail
         try {
             await sendRegistrationEmail({
                 email: normalizedEmail,
@@ -143,6 +147,6 @@ exports.handleRegistration = async (req, res) => {
 
     } catch (error) {
         console.error("REGISTRATION_FLOW_ERROR:", error);
-        res.status(500).json({ success: false, message: "Internal Server Error" });
+        res.status(500).json({ success: false, message: "Critical Server Error" });
     }
 };

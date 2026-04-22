@@ -8,28 +8,29 @@ const studentSchema = new mongoose.Schema({
     registrationId: { type: String, unique: true },
     password: { type: String },
     isPortalActive: { type: Boolean, default: false }, 
-    enrollments: [{
-        course: { type: String, required: true },
-        enrolledAt: { type: Date, default: Date.now },
-        status: { type: String, enum: ['Applied', 'Enrolled', 'Completed'], default: 'Applied' }
-    }],
-    course: { type: String }, 
-    activeBatches: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Batch' }],
     
-    // --- FINANCIAL LEDGER ---
+    // --- TRANSFORMED MODE (Array) ---
+    enrollments: [{
+        course: { type: String },
+        enrolledAt: { type: Date, default: Date.now },
+        status: { type: String, enum: ['Applied', 'Enrolled', 'Completed'], default: 'Applied' },
+        courseFee: { type: Number, default: 0 },
+        paymentOption: { type: String }, // Removed required: true for legacy compatibility
+        transactionId: { type: String }, // Removed required: true for legacy compatibility
+        paymentStatus: { type: String, enum: ['PENDING', 'VERIFIED', 'REJECTED'], default: 'PENDING' },
+        emiMonths: { type: Number, default: 1 }
+    }],
+
+    // --- LEGACY MODE (Top-level) ---
+    course: { type: String }, 
     totalFee: { type: Number, default: 0 }, 
     amountPaid: { type: Number, default: 0 },
-    paymentOption: { type: String, enum: ['FULL', 'PARTIAL', 'CASH'], required: true },
-    transactionId: { type: String, unique: true, required: true },
-    paymentStatus: { type: String, enum: ['PENDING', 'VERIFIED', 'REJECTED'], default: 'PENDING' },
-    emiMonths: { type: Number, default: 1 },
-
-    appliedCoupon: {
-        code: { type: String },
-        discountValue: { type: Number }
-    },
-    isApproved: { type: Boolean, default: false },
-    studentImage: { data: Buffer, contentType: String }
+    paymentOption: { type: String },
+    transactionId: { type: String }, 
+    isApproved: { type: Boolean, default: false }
 }, { timestamps: true });
+
+// Sparse index allows uniqueness for new UTRs without breaking legacy docs that have null/missing UTRs
+studentSchema.index({ "enrollments.transactionId": 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.models.Student || mongoose.model('Student', studentSchema);

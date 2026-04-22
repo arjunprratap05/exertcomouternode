@@ -78,61 +78,34 @@ exports.getAuditLogs = async (req, res) => {
 // --- 5. STUDENT APPROVAL ---
 exports.approveStudent = async (req, res) => {
     try {
-        // CHANGE: Expecting batchIds (Array) from the checkbox list in AdminDashboard
-        const { batchIds } = req.body; 
-        const student = await Student.findById(req.params.id);
+        const { id } = req.params;
+        const { transactionId } = req.body; // Sent from frontend verify button
+        
+        const student = await Student.findById(id);
+        if (!student) return res.status(404).json({ message: "Student not found" });
 
-        if (!student) return res.status(404).json({ success: false, message: "Student not found" });
-
-        // --- MULTI-STREAM HISTORY LOGIC ---
-        // We track any batch that is being removed from the 'activeBatches' list
-        if (student.activeBatches && student.activeBatches.length > 0) {
+        // 1. Check if we are approving a specific enrollment in the array
+        if (transactionId && student.enrollments && student.enrollments.length > 0) {
+            const enrollIndex = student.enrollments.findIndex(e => e.transactionId === transactionId);
             
-            // Find IDs that were in the old list but are NOT in the new list
-            const removedBatches = student.activeBatches.filter(oldId => !batchIds.includes(oldId.toString()));
-
-            for (const oldBatchId of removedBatches) {
-                const oldBatch = await Batch.findById(oldBatchId);
-                
-                student.batchHistory.push({
-                    batchId: oldBatchId,
-                    batchCode: oldBatch?.batchCode || "Dead/Deleted Batch",
-                    shiftedAt: new Date(),
-                    reason: "Topic Stream De-authorized or Shifted"
-                });
+            if (enrollIndex !== -1) {
+                student.enrollments[enrollIndex].paymentStatus = 'VERIFIED';
+                student.enrollments[enrollIndex].status = 'Enrolled';
             }
         }
 
-        // --- SYNC NEW STATE ---
-        // 1. Assign the new Array of authorized streams
-        student.activeBatches = batchIds;
-        
-        // 2. Backward Compatibility: Set the first batch as the 'primary' batchId for old components
-        student.batchId = batchIds[0]; 
-
-        // 3. Update Status
+        // 2. Sync with Legacy Fields (Ensure UI stays consistent)
+        // If this is the first/only enrollment being verified, unlock the portal
         student.isApproved = true;
-        student.status = 'Enrolled';
+        student.isPortalActive = true;
+        
+        // 3. Save with validation disabled to prevent "Missing Field" errors from old data
+        await student.save({ validateBeforeSave: false });
 
-        await student.save();
-
-        // --- AUDIT LOG ---
-        await AuditLog.create({
-            action: "Multi-Stream Authorization",
-            performedBy: req.user?.username,
-            targetName: student.name,
-            details: `Authorized Streams: ${batchIds.length}`
-        });
-
-        res.json({ 
-            success: true, 
-            message: "Student authorized for selected topic streams",
-            count: batchIds.length 
-        });
-
-    } catch (err) {
-        console.error("Authorization Error:", err);
-        res.status(500).json({ success: false, message: "Sync Failure" });
+        res.status(200).json({ success: true, message: "Verification Successful" });
+    } catch (error) {
+        console.error("APPROVE_ERROR:", error);
+        res.status(500).json({ message: "Internal Server Error" });
     }
 };
 // --- 6. DATA FETCHERS ---
