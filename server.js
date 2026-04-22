@@ -4,6 +4,8 @@ const dotenv = require('dotenv');
 const mongoose = require('mongoose');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
+const dns = require('node:dns');
+dns.setServers(['1.1.1.1', '8.8.8.8']);
 
 dotenv.config(); 
 
