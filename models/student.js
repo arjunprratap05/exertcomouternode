@@ -19,18 +19,10 @@ const studentSchema = new mongoose.Schema({
     // --- FINANCIAL LEDGER ---
     totalFee: { type: Number, default: 0 }, 
     amountPaid: { type: Number, default: 0 },
-    
-    // --- NEW: DUAL-STAGE DISCOUNT LOGIC ---
-    discountRequest: {
-        amount: { type: Number, default: 0 },
-        reason: { type: String },
-        status: { 
-            type: String, 
-            enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED'], 
-            default: 'NONE' 
-        },
-        requestedAt: { type: Date }
-    },
+    paymentOption: { type: String, enum: ['FULL', 'PARTIAL', 'CASH'], required: true },
+    transactionId: { type: String, unique: true, required: true },
+    paymentStatus: { type: String, enum: ['PENDING', 'VERIFIED', 'REJECTED'], default: 'PENDING' },
+    emiMonths: { type: Number, default: 1 },
 
     appliedCoupon: {
         code: { type: String },
@@ -40,5 +32,4 @@ const studentSchema = new mongoose.Schema({
     studentImage: { data: Buffer, contentType: String }
 }, { timestamps: true });
 
-// Singleton Pattern for Vercel
 module.exports = mongoose.models.Student || mongoose.model('Student', studentSchema);

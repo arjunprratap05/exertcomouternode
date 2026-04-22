@@ -348,3 +348,49 @@ exports.approveDiscount = async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 };
+
+exports.approveStudent = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const student = await Student.findById(id);
+
+        if (!student) {
+            return res.status(404).json({ success: false, message: "Student not found" });
+        }
+
+        // 1. Mark as Verified
+        student.paymentStatus = 'VERIFIED';
+        student.isPortalActive = true;
+        student.isApproved = true;
+
+        // 2. SYNC THE LEDGER (The fix you asked for)
+        // If it was a FULL payment, amountPaid becomes totalFee.
+        // If it was PARTIAL, you might want to add only the first installment.
+        if (student.paymentOption === 'FULL') {
+            student.amountPaid = student.totalFee;
+        } else if (student.paymentOption === 'PARTIAL') {
+            // For partial, we assume the first EMI is paid now.
+            // Calculation: Total / Months (Match your React frontend logic)
+            const firstInstallment = Math.round(student.totalFee / (student.emiMonths || 1));
+            student.amountPaid = (student.amountPaid || 0) + firstInstallment;
+        }
+        // Note: For CASH, amountPaid stays 0 until you manually update it 
+        // OR you can set it to the total if you received full cash.
+
+        // 3. Update Enrollment status
+        if (student.enrollments && student.enrollments.length > 0) {
+            student.enrollments[student.enrollments.length - 1].status = 'Enrolled';
+        }
+
+        await student.save();
+
+        res.status(200).json({ 
+            success: true, 
+            message: `Payment verified. Amount Paid: ₹${student.amountPaid} updated.` 
+        });
+
+    } catch (error) {
+        console.error("APPROVE_STUDENT_ERROR:", error);
+        res.status(500).json({ success: false, message: "Internal Server Error" });
+    }
+};

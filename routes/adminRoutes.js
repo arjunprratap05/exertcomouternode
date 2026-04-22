@@ -49,4 +49,5 @@ router.patch(
     adminController.approveDiscount
 );
 
+router.patch('/approve-student/:id', authMiddleware, adminController.approveStudent);
 module.exports = router;
