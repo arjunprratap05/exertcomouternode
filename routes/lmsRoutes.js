@@ -13,7 +13,13 @@ const staffAccess = authorize('founder', 'accounts', 'frontoffice');
 
 // --- ADMIN ROUTES ---
 router.post('/add-lecture', authMiddleware, staffAccess, lmsController.addLecture);
-router.post('/add-material', authMiddleware, staffAccess, upload.single('file'), lmsController.addMaterial);
+router.post(
+    '/add-material', 
+    authMiddleware, 
+    authorize('founder', 'frontoffice', 'accounts'), // Ensure 'founder' is here!
+    upload.single('file'), 
+    lmsController.addMaterial
+);
 router.get('/lectures', authMiddleware, staffAccess, lmsController.getAllLectures);
 router.delete('/delete-lecture/:id', authMiddleware, staffAccess, lmsController.deleteLecture);
 

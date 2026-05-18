@@ -17,7 +17,12 @@ router.get('/pending-students', authMiddleware, adminController.getPendingStuden
 router.patch('/approve-student/:id', authMiddleware, adminController.approveStudent);
 
 router.post('/batches/create', authMiddleware, adminController.createBatch);
-router.get('/batches/active', authMiddleware, adminController.getActiveBatches);
+router.get(
+    '/batches/active', 
+    authMiddleware, 
+    authorize('founder', 'accounts', 'frontoffice', 'student'), // Added 'student'
+    adminController.getActiveBatches
+);
 
 router.delete('/batches/:id', authMiddleware, adminController.deleteBatch);
 
@@ -50,4 +55,12 @@ router.patch(
 );
 
 router.patch('/approve-student/:id', authMiddleware, adminController.approveStudent);
+
+router.patch(
+    '/registrations/:id/authorize-batch', 
+    authMiddleware, 
+    authorize('founder', 'accounts', 'frontoffice'), 
+    adminController.authorizeStudentBatch
+);
+
 module.exports = router;

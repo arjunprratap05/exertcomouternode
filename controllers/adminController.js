@@ -111,9 +111,14 @@ exports.approveStudent = async (req, res) => {
 // --- 6. DATA FETCHERS ---
 exports.getAllStudents = async (req, res) => {
     try {
-        const data = await Student.find().sort({ createdAt: -1 });
-        res.json({ success: true, data });
-    } catch (err) { res.status(500).json({ success: false }); }
+        const students = await Student.find()
+            .populate('activeBatches')
+            .sort({ createdAt: -1 });
+        
+        res.status(200).json({ success: true, data: students });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
 };
 
 exports.getEnquiries = async (req, res) => {
@@ -165,24 +170,18 @@ exports.getActiveBatches = async (req, res) => {
 
 exports.deleteBatch = async (req, res) => {
     try {
-        const { id } = req.params;
-        const deletedBatch = await Batch.findByIdAndDelete(id);
+        const batchId = req.params.id;
+        await Batch.findByIdAndDelete(batchId);
 
-        if (!deletedBatch) {
-            return res.status(404).json({ success: false, message: "Batch not found" });
-        }
+        // AUTO-CLEANUP: If a batch is deleted, remove it from all students
+        await Student.updateMany(
+            {}, 
+            { $pull: { activeBatches: batchId } }
+        );
 
-        // Optional: Add to Audit Log
-        await AuditLog.create({
-            action: "Batch Deleted",
-            performedBy: req.user?.username,
-            targetName: deletedBatch.batchCode,
-            details: `Deleted by ${req.user?.username}`
-        });
-
-        res.json({ success: true, message: "Batch removed successfully" });
+        res.json({ success: true, message: "Batch wiped and student access revoked" });
     } catch (err) {
-        res.status(500).json({ success: false, message: "Server Error during deletion" });
+        res.status(500).json({ success: false, message: err.message });
     }
 };
 
@@ -365,5 +364,31 @@ exports.approveStudent = async (req, res) => {
     } catch (error) {
         console.error("APPROVE_STUDENT_ERROR:", error);
         res.status(500).json({ success: false, message: "Internal Server Error" });
+    }
+};
+
+exports.authorizeStudentBatch = async (req, res) => {
+    try {
+        const studentId = req.params.id;
+        const { batchId, targetName } = req.body;
+
+        if (!batchId) return res.status(400).json({ success: false, message: "Batch ID missing" });
+
+        // Update student using $addToSet (prevents duplicates)
+        const student = await Student.findByIdAndUpdate(
+            studentId,
+            { $addToSet: { activeBatches: batchId } },
+            { new: true }
+        ).populate('activeBatches');
+
+        if (!student) return res.status(404).json({ success: false, message: "Student record not found" });
+
+        res.status(200).json({ 
+            success: true, 
+            message: `Student authorized for ${targetName || 'Batch'}`,
+            data: student.activeBatches 
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
     }
 };
