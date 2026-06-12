@@ -1,40 +1,50 @@
 const express = require('express');
 const cors = require('cors');
-const dotenv = require('dotenv');
 const mongoose = require('mongoose');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const dns = require('node:dns');
-const http = require('http'); // <-- NEW: Required for Socket.io
-const { Server } = require('socket.io'); // <-- NEW: Required for Socket.io
+const http = require('http'); 
+const { Server } = require('socket.io'); 
+
+// --- THE VERCEL FIX: Only run dotenv in local development ---
+if (process.env.NODE_ENV !== 'production') {
+    require('dotenv').config(); 
+}
 
 dns.setServers(['1.1.1.1', '8.8.8.8']);
 
-dotenv.config(); 
-
 const app = express();
 
-// --- NEW: WRAP EXPRESS IN HTTP SERVER ---
+// --- WRAP EXPRESS IN HTTP SERVER ---
 const server = http.createServer(app);
 
-// --- NEW: CONFIGURE SOCKET.IO ---
+// --- 1. CORS CONFIGURATION (Fortified for Vercel) ---
+// It's safer to explicitly list your live domains alongside the env variable
+const allowedOrigins = [
+    process.env.FRONTEND_URL,
+].filter(Boolean); // Removes any undefined values
+
+const corsOptions = {
+    origin: allowedOrigins, 
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'], 
+    credentials: true,
+};
+app.use(cors(corsOptions));
+
+// --- CONFIGURE SOCKET.IO ---
 const io = new Server(server, {
-    cors: {
-        origin: process.env.FRONTEND_URL || "http://localhost:5173", 
-        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-        credentials: true
-    }
+    cors: corsOptions // Reuse the same robust CORS options
 });
 
-// Make 'io' globally accessible so controllers (like your WhatsApp controller) can emit events
+// Make 'io' globally accessible so controllers can emit events
 app.set('io', io);
 
-// --- 1. SECURITY & UTILITY MIDDLEWARE ---
+// --- 2. SECURITY & UTILITY MIDDLEWARE ---
 app.use(helmet()); 
-// Limit increased to 10mb to support large PDF uploads/Audit history
 app.use(express.json({ limit: '10mb' })); 
 
-// --- 2. AUTH-SPECIFIC RATE LIMITER ---
+// --- 3. AUTH-SPECIFIC RATE LIMITER ---
 const otpLimiter = rateLimit({
     windowMs: 5 * 60 * 1000, 
     max: 20, 
@@ -45,14 +55,6 @@ const otpLimiter = rateLimit({
         msg: "Security block: Too many OTP attempts. Please wait 5 minutes." 
     }
 });
-
-// --- 3. CORS CONFIGURATION (Critical for Multi-Course Patching) ---
-const corsOptions = {
-    origin: process.env.FRONTEND_URL || "http://localhost:5173", 
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'], // Ensure PATCH is allowed
-    credentials: true,
-};
-app.use(cors(corsOptions));
 
 // --- 4. ROBUST DATABASE CONNECTION ---
 const connectDB = async () => {
@@ -69,7 +71,6 @@ const connectDB = async () => {
 connectDB();
 
 // --- 5. ROUTES ---
-// OTP Limiter applied only to Auth (Login/Forgot Pass)
 app.use('/api/auth', otpLimiter, require('./routes/authRoutes')); 
 app.use('/api/registration', require('./routes/registrationRoutes')); 
 app.use('/api/inquiry', require('./routes/inquiryRoutes'));
@@ -95,5 +96,4 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-// --- CHANGED: Use server.listen instead of app.listen ---
 server.listen(PORT, () => console.log(`🚀 Expert Academy API running on port ${PORT}`));
