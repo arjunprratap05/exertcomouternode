@@ -4,10 +4,8 @@ const mongoose = require('mongoose');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const dns = require('node:dns');
-const http = require('http'); 
-const { Server } = require('socket.io'); 
 
-// --- THE VERCEL FIX: Only run dotenv in local development ---
+// Only run dotenv in local development
 if (process.env.NODE_ENV !== 'production') {
     require('dotenv').config(); 
 }
@@ -16,29 +14,17 @@ dns.setServers(['1.1.1.1', '8.8.8.8']);
 
 const app = express();
 
-// --- WRAP EXPRESS IN HTTP SERVER ---
-const server = http.createServer(app);
-
-// --- 1. CORS CONFIGURATION (Fortified for Vercel) ---
-// It's safer to explicitly list your live domains alongside the env variable
+// --- 1. CORS CONFIGURATION ---
 const allowedOrigins = [
     process.env.FRONTEND_URL,
-].filter(Boolean); // Removes any undefined values
+    
+].filter(Boolean);
 
-const corsOptions = {
+app.use(cors({
     origin: allowedOrigins, 
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'], 
     credentials: true,
-};
-app.use(cors(corsOptions));
-
-// --- CONFIGURE SOCKET.IO ---
-const io = new Server(server, {
-    cors: corsOptions // Reuse the same robust CORS options
-});
-
-// Make 'io' globally accessible so controllers can emit events
-app.set('io', io);
+}));
 
 // --- 2. SECURITY & UTILITY MIDDLEWARE ---
 app.use(helmet()); 
@@ -65,7 +51,8 @@ const connectDB = async () => {
         console.log("✅ Expert Academy Database Connected");
     } catch (err) {
         console.error("❌ MongoDB Connection Error:", err.message);
-        setTimeout(connectDB, 5000); 
+        // Do not use recursive setTimeout in serverless environments, 
+        // it can cause function timeouts. Just log the error.
     }
 };
 connectDB();
@@ -90,10 +77,16 @@ app.use((err, req, res, next) => {
     console.error(`[Error]: ${err.message}`);
     res.status(err.status || 500).json({ 
         success: false, 
-        msg: err.message || "System encountered an Internal Directory Error" 
+        msg: err.message || "System encountered an Internal Server Error" 
     });
 });
 
-const PORT = process.env.PORT || 5000;
+// --- 7. VERCEL EXPORT ---
+// Instead of server.listen(), we export the app for Vercel Serverless
+module.exports = app;
 
-server.listen(PORT, () => console.log(`🚀 Expert Academy API running on port ${PORT}`));
+// Allow local development testing
+if (process.env.NODE_ENV !== 'production') {
+    const PORT = process.env.PORT || 5000;
+    app.listen(PORT, () => console.log(`🚀 Local dev server running on port ${PORT}`));
+}
