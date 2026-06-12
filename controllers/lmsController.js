@@ -7,6 +7,7 @@ const techCoursesData = courseData.techCoursesData || [];
 const universityPrograms = courseData.universityPrograms || [];
 
 const allConfiguredCourses = [...techCoursesData, ...universityPrograms];
+
 // --- 1. ADD LECTURE (With Pre-populated Response Fix) ---
 exports.addLecture = async (req, res) => {
     try {
@@ -67,13 +68,14 @@ exports.getAllMaterials = async (req, res) => {
 // --- 4. MULTI-BATCH SYNC AGGREGATOR (High-Performance Parallel Execution) ---
 exports.syncMultiBatchLMS = async (req, res) => {
     try {
-        const { batchIds } = req.body; 
+        // 1. Accept explicitly passed courses from the frontend
+        const { batchIds, explicitCourses = [] } = req.body; 
 
         if (!batchIds || !Array.isArray(batchIds)) {
             return res.status(400).json({ success: false, message: "No streams authorized" });
         }
 
-        // 1. Cast string IDs safely into valid Mongoose ObjectIds
+        // 2. Cast string IDs safely into valid Mongoose ObjectIds
         const validBatchObjectIds = batchIds
             .filter(id => id && mongoose.Types.ObjectId.isValid(id))
             .map(id => new mongoose.Types.ObjectId(id));
@@ -82,11 +84,11 @@ exports.syncMultiBatchLMS = async (req, res) => {
             return res.json({ success: true, data: { lectures: [], materials: [] } });
         }
 
-        // 2. Resolve Active Authorized Batches from Payload
+        // 3. Resolve Active Authorized Batches from Payload
         const activeBatches = await Batch.find({ _id: { $in: validBatchObjectIds } });
         
-        // 3. Compute Dynamic Search Identifiers List for loose tracking matches
-        const authorizedIdentifiers = [];
+        // 4. Compute Dynamic Search Identifiers List for loose tracking matches
+        const authorizedIdentifiers = [...explicitCourses]; // Seed with explicit frontend strings
 
         activeBatches.forEach(b => {
             if (b.courseId) {
@@ -131,8 +133,8 @@ exports.syncMultiBatchLMS = async (req, res) => {
             )
         ];
 
-        // 4. Construct case-insensitive sub-string native MongoDB $or regex conditions
-        let materialQueryCondition = { course: "__NON_EXISTENT_FALLBACK__" };
+        // 5. Construct case-insensitive sub-string native MongoDB $or regex conditions
+        let materialQueryCondition = {}; // Default open, frontend handles strict validation
         let lectureRegexOrQuery = [];
 
         if (searchTerms.length > 0) {
@@ -151,22 +153,23 @@ exports.syncMultiBatchLMS = async (req, res) => {
             });
         }
 
+        // Fix the Null Query Trap: Check if NOT true, rather than strict false
         const lectureQueryCondition = lectureRegexOrQuery.length > 0 
-            ? { $or: [{ batchId: { $in: validBatchObjectIds } }, ...lectureRegexOrQuery], isCancelled: false }
-            : { batchId: { $in: validBatchObjectIds }, isCancelled: false };
+            ? { $or: [{ batchId: { $in: validBatchObjectIds } }, ...lectureRegexOrQuery], isCancelled: { $ne: true } }
+            : { batchId: { $in: validBatchObjectIds }, isCancelled: { $ne: true } };
 
-        // 5. High-Performance Parallel Query Core
+        // 6. High-Performance Parallel Query Core
         const [lectures, materials] = await Promise.all([
             Lecture.find(lectureQueryCondition)
                 .populate('batchId', 'batchCode startTime endTime')
                 .sort({ createdAt: -1 }),
-                
+            
             Material.find(materialQueryCondition)
                 .select('-file.data')
                 .sort({ createdAt: -1 })
         ]);
 
-        // 6. Return Aggregated Workspace Objects Payload
+        // 7. Return Aggregated Workspace Objects Payload
         res.json({
             success: true,
             data: { lectures, materials }

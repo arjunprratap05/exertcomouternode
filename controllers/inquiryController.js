@@ -6,9 +6,40 @@ exports.processNewLead = async (req, res) => {
     try {
         const { name, email, phone, message, course, source = 'Website' } = req.body;
         
-        const newInquiry = new Inquiry({ name, email, phone, course, message, source });
+        // --- 1. SMART DUPLICATE CHECK ---
+        // We dynamically build the query so we don't accidentally block multiple 
+        // chatbot leads who might share the default "Not Provided" email state.
+        const duplicateQuery = [{ phone: phone }];
+        
+        if (email && email.trim() !== "" && email !== "Not Provided") {
+            duplicateQuery.push({ email: email.toLowerCase().trim() });
+        }
+
+        // Check the database for any matching phone OR valid email
+        const existingInquiry = await Inquiry.findOne({ $or: duplicateQuery });
+
+        if (existingInquiry) {
+            // Return 409 Conflict so the frontend knows exactly why it was rejected
+            return res.status(409).json({ 
+                success: false, 
+                message: "An inquiry with this phone number or email already exists in our system. Our team will contact you shortly!" 
+            });
+        }
+        // --------------------------------
+
+        // 2. SAVE NEW LEAD
+        const newInquiry = new Inquiry({ 
+            name, 
+            email: email ? email.toLowerCase().trim() : "Not Provided", 
+            phone, 
+            course, 
+            message, 
+            source 
+        });
+        
         await newInquiry.save();
 
+        // 3. TRIGGER MAIL NOTIFICATION
         try {
             await sendInquiryEmail(newInquiry);
         } catch (mailErr) {

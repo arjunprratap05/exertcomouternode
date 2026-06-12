@@ -3,6 +3,7 @@ const router = express.Router();
 const adminController = require('../controllers/adminController');
 const couponController = require('../controllers/couponController');
 const { authMiddleware, authorize } = require('../middleware/authMiddleware');
+const { getWhatsAppLeads,getWhatsAppChat,toggleAiControl,sendManualWhatsAppMessage} = require('../controllers/adminController');
 
 router.post('/login', adminController.adminLogin);
 
@@ -62,5 +63,10 @@ router.patch(
     authorize('founder', 'accounts', 'frontoffice'), 
     adminController.authorizeStudentBatch
 );
+
+router.get('/whatsapp-leads', getWhatsAppLeads);
+router.get('/whatsapp-chat/:phone', getWhatsAppChat);
+router.patch('/student/:id/ai-toggle', toggleAiControl);
+router.post('/send-whatsapp', sendManualWhatsAppMessage);
 
 module.exports = router;

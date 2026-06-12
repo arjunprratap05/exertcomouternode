@@ -10,15 +10,14 @@ exports.handleRegistration = async (req, res) => {
     try {
         const { 
             name, email, aadhaarNo, course, totalFee, 
-            appliedCoupon, paymentOption, transactionId, emiInterval 
+            amountPaid, appliedCoupon, paymentOption, transactionId, emiInterval
         } = req.body;
 
-        // 1. DATA SANITIZATION
-        let finalFee = Number(totalFee) || 0;
+        let netPayableFee = Number(totalFee) || 0; 
+        let cashOrDigitalPaid = Number(amountPaid) || 0;
         let finalTransactionId = transactionId;
         const normalizedEmail = email.toLowerCase().trim();
 
-        // 2. TRANSACTION ID LOGIC
         if (paymentOption === 'CASH') {
             const fy = getFinancialYearSequence();
             const counter = await Counter.findOneAndUpdate(
@@ -28,7 +27,6 @@ exports.handleRegistration = async (req, res) => {
             );
             finalTransactionId = `ECA/CASH/${fy.label}/${counter.seq.toString().padStart(3, '0')}`;
         } else {
-            // GLOBAL UTR CHECK (Ensures UTR is unique across all students and all courses)
             const existingUTR = await Student.findOne({ "enrollments.transactionId": finalTransactionId });
             if (existingUTR) {
                 return res.status(400).json({ 
@@ -38,7 +36,11 @@ exports.handleRegistration = async (req, res) => {
             }
         }
 
-        // 3. COUPON VERIFICATION (Atomic Update)
+        let determinedStatus = "PENDING";
+        if (cashOrDigitalPaid > 0) {
+            determinedStatus = cashOrDigitalPaid >= netPayableFee ? "PAID" : "PARTIALLY_PAID";
+        }
+
         let couponData = null;
         if (appliedCoupon) {
             try {
@@ -58,31 +60,39 @@ exports.handleRegistration = async (req, res) => {
             } catch (e) { console.error("Coupon Processing Error:", e); }
         }
 
-        // 4. FIND STUDENT BY AADHAAR
+        const enrollmentCard = {
+            course,
+            courseFee: netPayableFee,      
+            amountPaid: cashOrDigitalPaid, 
+            paymentOption,
+            transactionId: finalTransactionId,
+            emiMonths: emiInterval || 1,
+            appliedCoupon: couponData,
+            paymentStatus: determinedStatus,
+            status: 'Applied',
+            enrolledAt: new Date()
+        };
+
         let student = await Student.findOne({ aadhaarNo });
 
         if (student) {
-            // --- RETURNING STUDENT LOGIC ---
             const alreadyEnrolled = student.enrollments.some(e => e.course === course);
             if (alreadyEnrolled) {
                 return res.status(400).json({ success: false, message: "You are already registered for this course." });
             }
 
-            // Push New Enrollment Object
-            const newEnrollment = {
-                course,
-                courseFee: finalFee,
-                paymentOption,
-                transactionId: finalTransactionId,
-                emiMonths: emiInterval || 1,
-                appliedCoupon: couponData,
-                status: 'Applied'
-            };
+            // Dual Sync: Push into array list AND override root trackers with the latest course snapshot
+            student.enrollments.push(enrollmentCard);
+            
+            student.course = course;
+            student.totalFee = netPayableFee;
+            student.amountPaid = cashOrDigitalPaid;
+            student.paymentOption = paymentOption;
+            student.transactionId = finalTransactionId;
+            student.leadStatus = 'Applicant';
 
-            student.enrollments.push(newEnrollment);
             await student.save();
 
-            // Notify via Mail
             try {
                 await sendRegistrationEmail({
                     email: student.email,
@@ -94,15 +104,10 @@ exports.handleRegistration = async (req, res) => {
                 });
             } catch (mErr) { console.error("Mail Error:", mErr); }
 
-            return res.status(201).json({ 
-                success: true, 
-                isReturning: true, 
-                registrationId: student.registrationId,
-                transactionId: finalTransactionId 
-            });
+            return res.status(201).json({ success: true, isReturning: true, registrationId: student.registrationId });
         }
 
-        // --- NEW STUDENT LOGIC ---
+        // --- NEW STUDENT PROFILE WRITES BOTH FIELDS SIMULTANEOUSLY ---
         const rawPassword = crypto.randomBytes(4).toString('hex').toUpperCase();
         const hashedPassword = await bcrypt.hash(rawPassword, 12);
 
@@ -111,20 +116,21 @@ exports.handleRegistration = async (req, res) => {
             email: normalizedEmail,
             password: hashedPassword,
             registrationId: normalizedEmail, 
-            enrollments: [{
-                course,
-                courseFee: finalFee,
-                paymentOption,
-                transactionId: finalTransactionId,
-                emiMonths: emiInterval || 1,
-                appliedCoupon: couponData,
-                status: 'Applied'
-            }]
+            
+            // Legacy Root System Sync
+            course,
+            totalFee: netPayableFee,
+            amountPaid: cashOrDigitalPaid,
+            paymentOption,
+            transactionId: finalTransactionId,
+            leadStatus: 'Applicant',
+            
+            // New Array System Sync
+            enrollments: [enrollmentCard]
         });
 
         await newStudent.save();
 
-        // Notify via Mail
         try {
             await sendRegistrationEmail({
                 email: normalizedEmail,
@@ -137,13 +143,7 @@ exports.handleRegistration = async (req, res) => {
             });
         } catch (mErr) { console.error("Mail Error:", mErr); }
 
-        return res.status(201).json({ 
-            success: true, 
-            isReturning: false, 
-            registrationId: newStudent.registrationId, 
-            rawPassword,
-            transactionId: finalTransactionId
-        });
+        return res.status(201).json({ success: true, isReturning: false, rawPassword, registrationId: newStudent.registrationId });
 
     } catch (error) {
         console.error("REGISTRATION_FLOW_ERROR:", error);

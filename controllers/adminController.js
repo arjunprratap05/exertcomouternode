@@ -3,7 +3,8 @@ const Inquiry = require('../models/Inquiry');
 const AuditLog = require('../models/AuditLog');
 const Batch = require('../models/Batch');
 const jwt = require('jsonwebtoken');
-
+const Message = require('../models/Message');
+const { sendWhatsAppMessage } = require('../services/whatsappService');
 // --- 1. ADMIN LOGIN ---
 exports.adminLogin = async (req, res) => {
     try {
@@ -391,4 +392,93 @@ exports.authorizeStudentBatch = async (req, res) => {
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
+};
+
+exports.getWhatsAppLeads = async (req, res) => {
+    try {
+        // Fetch all students who have a phone number (acting as WhatsApp leads)
+        // Sorting by newest first
+        const leads = await Student.find({ phone: { $exists: true, $ne: null } })
+            .select('name phone leadStatus isAiControlled updatedAt')
+            .sort({ updatedAt: -1 })
+            .limit(50);
+            
+        res.status(200).json({ success: true, data: leads });
+    } catch (error) {
+        console.error("Error fetching leads:", error);
+        res.status(500).json({ success: false, msg: "Failed to fetch WhatsApp leads" });
+    }
+};
+
+exports.getWhatsAppChat = async (req, res) => {
+    try {
+        const { phone } = req.params;
+        
+        // Fetch conversation history and sort chronologically (oldest to newest for UI)
+        const chatHistory = await Message.find({ phoneNumber: phone })
+            .sort({ timestamp: 1 });
+            
+        res.status(200).json({ success: true, data: chatHistory });
+    } catch (error) {
+        console.error("Error fetching chat:", error);
+        res.status(500).json({ success: false, msg: "Failed to fetch chat history" });
+    }
+};
+
+exports.toggleAiControl = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { isAiControlled } = req.body;
+        
+        await Student.findByIdAndUpdate(id, { isAiControlled });
+        
+        res.status(200).json({ success: true, msg: `AI Control set to ${isAiControlled}` });
+    } catch (error) {
+        console.error("Error toggling AI:", error);
+        res.status(500).json({ success: false, msg: "Failed to toggle AI status" });
+    }
+};
+
+exports.sendManualWhatsAppMessage = async (req, res) => {
+    try {
+        const { phone, message } = req.body;
+        
+        if (!phone || !message) {
+            return res.status(400).json({ success: false, msg: "Phone and message are required" });
+        }
+
+        // 1. Send via Meta API
+        await sendWhatsAppMessage(phone, message);
+
+        // 2. Save to database as an 'agent' message
+        const savedMessage = await Message.create({
+            phoneNumber: phone,
+            sender: 'agent',
+            text: message
+        });
+
+        // 3. Emit via Socket.io so other admin screens update instantly
+        const io = req.app.get('io');
+        if (io) {
+            io.emit('new_whatsapp_message', { phone, text: message, sender: 'agent' });
+        }
+
+        res.status(200).json({ success: true, data: savedMessage });
+    } catch (error) {
+        console.error("Error sending manual message:", error);
+        res.status(500).json({ success: false, msg: "Failed to send message" });
+    }
+};
+
+exports.approvePayment = async (req, res) => {
+    const { studentId } = req.params;
+    const { transactionId } = req.body;
+
+    // This is the key: update the specific enrollment status
+    await Student.updateOne(
+        { _id: studentId, "enrollments.transactionId": transactionId },
+        { $set: { "enrollments.$.paymentStatus": "VERIFIED" } }
+    );
+    
+    res.json({ success: true });
 };
