@@ -1,5 +1,5 @@
 const axios = require('axios');
-const Student = require('../models/Student'); // Ensure capitalization matches your file
+const Student = require('../models/student'); // Ensure capitalization matches your file
 const Message = require('../models/Message');
 const { processAiResponse } = require('../services/aiService');
 
