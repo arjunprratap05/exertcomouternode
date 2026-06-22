@@ -1,4 +1,4 @@
-const Student = require('../models/Student');
+const Student = require('../models/student');
 const Inquiry = require('../models/Inquiry');
 const AuditLog = require('../models/AuditLog');
 const Batch = require('../models/Batch');
