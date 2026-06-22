@@ -5,7 +5,7 @@ const Batch = require('../models/Batch');
 const courseData = require('../data/course'); 
 const techCoursesData = courseData.techCoursesData || [];
 const universityPrograms = courseData.universityPrograms || [];
-
+const { PDFDocument, rgb, degrees, StandardFonts } = require('pdf-lib');
 const allConfiguredCourses = [...techCoursesData, ...universityPrograms];
 
 // --- 1. ADD LECTURE (With Pre-populated Response Fix) ---
@@ -184,23 +184,48 @@ exports.syncMultiBatchLMS = async (req, res) => {
 exports.downloadMaterial = async (req, res) => {
     try {
         const material = await Material.findById(req.params.id);
-        if (!material) {
+        if (!material || !material.file || !material.file.data) {
             return res.status(404).json({ success: false, message: "Resource not found" });
         }
 
-        // Enforce browser execution inside isolated secure viewport instead of forcing downloads
-        res.set({
-            'Content-Type': material.file.contentType,
-            'Content-Disposition': 'inline', 
-            'Cache-Control': 'no-store, no-cache, must-revalidate, private'
+        // 1. Explicitly convert the MongoDB buffer to Uint8Array
+        const pdfBytes = new Uint8Array(material.file.data.buffer || material.file.data);
+        
+        // 2. Load the PDF
+        const pdfDoc = await PDFDocument.load(pdfBytes);
+        const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        
+        // 3. Add watermark to every page
+        pdfDoc.getPages().forEach(page => {
+            const { width, height } = page.getSize();
+            
+            // We set the font size dynamically relative to page width 
+            // to ensure it always fits
+            const fontSize = width / 15; 
+        
+            page.drawText('EXPERT COMPUTER ACADEMY', {
+                // We start near the bottom-left, but within safe margins
+                x: width * 0.1, 
+                y: height * 0.2, 
+                size: fontSize,
+                font: font,
+                opacity: 0.2,
+                rotate: degrees(30), // Slightly reduced rotation to keep text in-bounds
+            });
         });
 
-        res.send(material.file.data);
+        // 4. Save and Send
+        const pdfData = await pdfDoc.save();
+        res.set({ 
+            'Content-Type': 'application/pdf', 
+            'Content-Disposition': 'inline' 
+        });
+        res.send(Buffer.from(pdfData));
     } catch (err) {
-        res.status(500).json({ success: false, message: "Streaming lifecycle crashed" });
+        console.error("Backend PDF Error:", err); // Check your terminal for the real error
+        res.status(500).json({ success: false, message: "Failed to process resource" });
     }
 };
-
 // --- 6. ADMIN FETCH ALL LECTURES ---
 exports.getAllLectures = async (req, res) => {
     try {

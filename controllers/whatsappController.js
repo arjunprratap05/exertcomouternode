@@ -1,4 +1,5 @@
-const Student = require('../models/student');
+const axios = require('axios');
+const Student = require('../models/Student'); // Ensure capitalization matches your file
 const Message = require('../models/Message');
 const { processAiResponse } = require('../services/aiService');
 
@@ -15,13 +16,22 @@ exports.handleIncomingMessage = async (req, res) => {
     const value = req.body.entry?.[0]?.changes?.[0]?.value;
     if (!value?.messages) return;
 
-    const studentPhone = value.messages[0].from;
+    let rawPhone = value.messages[0].from; 
+    
+    // Normalize Indian Phone Numbers (Strip '91' if exactly 12 digits)
+    let studentPhone = rawPhone;
+    if (rawPhone.startsWith('91') && rawPhone.length === 12) {
+        studentPhone = rawPhone.substring(2); 
+    }
+    
     const messageText = value.messages[0].text?.body;
     if (!messageText) return;
 
-    // 1. Find or create lead (Ensuring it links to the dashboard)
+    // 1. Find the student 
     let student = await Student.findOne({ phone: studentPhone });
+    
     if (!student) {
+        // SCENARIO A: Brand new student. Create them and tag them.
         student = await Student.create({ 
             name: "New WhatsApp Lead",
             phone: studentPhone, 
@@ -29,35 +39,43 @@ exports.handleIncomingMessage = async (req, res) => {
             aadhaarNo: `TEMP_${studentPhone}_${Date.now()}`,
             isAiControlled: true,
             leadStatus: 'Cold Lead',
-            leadSource: 'WhatsApp' // <--- CRITICAL FIX: This makes it show up in the dashboard route
+            leadSource: 'WhatsApp'
         });
+    } else {
+        // SCENARIO B: Existing student. 
+        // Force them to appear in the dashboard by updating their leadSource.
+        if (student.leadSource !== 'WhatsApp') {
+            await Student.updateOne(
+                { _id: student._id }, 
+                { leadSource: 'WhatsApp' }
+            );
+        }
     }
 
-    // 2. Save message to history (Stores entire chat for registration contact)
+    // 2. Save message to history (FIXED: Added explicit timestamp field)
     await Message.create({ 
-        phoneNumber: studentPhone, 
+        phoneNumber: studentPhone,
         sender: 'student', 
-        text: messageText 
+        text: messageText,
+        timestamp: new Date()
     });
 
     // 3. Intelligent Routing
     const currentHour = new Date().getHours();
-    // 9 AM to 6 PM (09:00 - 17:59)
-    const isBusinessHours = currentHour >= 9 && currentHour < 18;
+    const isBusinessHours = currentHour >= 9 && currentHour < 18; // 9 AM to 6 PM
 
     if (isBusinessHours) {
-        // Human is in the office
         console.log(`Human intervention required for: ${studentPhone}`);
-        await Student.updateOne({ phone: studentPhone }, { leadStatus: 'Warm Lead' });
     } else if (student.isAiControlled) {
-        // After hours + AI is turned on
         await processAiResponse(studentPhone, messageText);
     }
 };
 
+// --- ADMIN DASHBOARD FUNCTIONS ---
+
 exports.getMessages = async (req, res) => {
     try {
-        const messages = await Message.find({ phoneNumber: req.params.phone }).sort({ createdAt: 1 });
+        const messages = await Message.find({ phoneNumber: req.params.phone }).sort({ timestamp: 1 });
         res.json({ success: true, messages });
     } catch (err) {
         console.error("Error fetching messages:", err);
@@ -65,29 +83,47 @@ exports.getMessages = async (req, res) => {
     }
 };
 
-// Send a manual reply from the admin dashboard
 exports.sendManualMessage = async (req, res) => {
     try {
-        const { phone, text } = req.body;
+        const { phone, text } = req.body; 
         
-        // 1. Save the admin's message to the database immediately
+        // 1. Connect to Meta API to send the message
+        await axios.post(
+            `https://graph.facebook.com/v18.0/${process.env.META_PHONE_ID}/messages`,
+            {
+                messaging_product: "whatsapp",
+                recipient_type: "individual",
+                to: phone.length === 10 ? `91${phone}` : phone, 
+                type: "text",
+                text: { preview_url: false, body: text }
+            },
+            {
+                headers: {
+                    'Authorization': `Bearer ${process.env.META_ACCESS_TOKEN}`,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+
+        // 2. Save the admin's message to the database (FIXED: sender updated to 'agent' & explicit timestamp added)
         const newMessage = await Message.create({ 
             phoneNumber: phone, 
-            sender: 'admin', 
-            text: text 
+            sender: 'agent', 
+            text: text,
+            agentNumber: process.env.AGENT_1_PHONE,
+            timestamp: new Date()
         });
-
-        // 2. Add your Meta API call here later to actually send the message to their WhatsApp!
-        // await axios.post('https://graph.facebook.com/v17.0/...', { ... })
 
         res.json({ success: true, message: newMessage });
     } catch (err) {
-        console.error("Error sending manual message:", err);
-        res.status(500).json({ success: false, message: "Failed to send message" });
+        console.error("Meta API Connection Error:", err.response?.data || err.message);
+        res.status(500).json({ 
+            success: false, 
+            message: "Failed to connect to Meta API." 
+        });
     }
 };
 
-// Toggle whether the AI or a Human is handling the chat
 exports.toggleAi = async (req, res) => {
     try {
         const { isAiControlled } = req.body;
