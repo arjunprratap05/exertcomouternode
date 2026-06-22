@@ -4,33 +4,32 @@ const multer = require('multer');
 const lmsController = require('../controllers/lmsController');
 const { authMiddleware, authorize } = require('../middleware/authMiddleware');
 
+// 1. INITIALIZE VARIABLES FIRST
+const staffAccess = authorize('founder', 'accounts', 'frontoffice');
+const adminAccess = authorize('founder', 'frontoffice', 'accounts');
+
 const upload = multer({ 
     storage: multer.memoryStorage(),
     limits: { fileSize: 16 * 1024 * 1024 } 
 });
 
-const staffAccess = authorize('founder', 'accounts', 'frontoffice');
+// 2. DEFINE ROUTES (Using functional wrappers to ensure Express loads them correctly)
 
 // --- ADMIN ROUTES ---
-router.post('/add-lecture', authMiddleware, staffAccess, lmsController.addLecture);
-router.post(
-    '/add-material', 
-    authMiddleware, 
-    authorize('founder', 'frontoffice', 'accounts'), // Ensure 'founder' is here!
-    upload.single('file'), 
-    lmsController.addMaterial
-);
-router.get('/lectures', authMiddleware, staffAccess, lmsController.getAllLectures);
-router.delete('/delete-lecture/:id', authMiddleware, staffAccess, lmsController.deleteLecture);
-
-// NEW: Missing routes to support Admin Directory
-router.get('/materials', authMiddleware, staffAccess, lmsController.getAllMaterials);
-router.delete('/delete-material/:id', authMiddleware, staffAccess, lmsController.deleteMaterial);
+router.post('/add-lecture', authMiddleware, staffAccess, (req, res, next) => lmsController.addLecture(req, res, next));
+router.post('/add-material', authMiddleware, adminAccess, upload.single('file'), (req, res, next) => lmsController.addMaterial(req, res, next));
+router.get('/lectures', authMiddleware, staffAccess, (req, res, next) => lmsController.getAllLectures(req, res, next));
+router.delete('/delete-lecture/:id', authMiddleware, staffAccess, (req, res, next) => lmsController.deleteLecture(req, res, next));
+router.get('/materials', authMiddleware, staffAccess, (req, res, next) => lmsController.getAllMaterials(req, res, next));
+router.delete('/delete-material/:id', authMiddleware, staffAccess, (req, res, next) => lmsController.deleteMaterial(req, res, next));
 
 // --- STUDENT ROUTES ---
-router.get('/download/:id', authMiddleware, lmsController.downloadMaterial);
-router.post('/sync-multi', authMiddleware, lmsController.syncMultiBatchLMS);
+router.get('/download/:id', 
+    (req, res, next) => authMiddleware(req, res, next), 
+    (req, res, next) => lmsController.downloadMaterial(req, res, next)
+);
 
-router.get('/add-lecture', authMiddleware, lmsController.getAllLectures);
+router.post('/sync-multi', authMiddleware, (req, res, next) => lmsController.syncMultiBatchLMS(req, res, next));
+router.get('/add-lecture', authMiddleware, (req, res, next) => lmsController.getAllLectures(req, res, next));
 
 module.exports = router;
