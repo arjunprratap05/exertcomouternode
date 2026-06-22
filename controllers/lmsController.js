@@ -3,7 +3,7 @@ const Lecture = require('../models/Lecture');
 const Material = require('../models/Material');
 const Batch = require('../models/Batch');
 const courseData = require('../data/course'); 
-const Student = require('../models/Student');
+const Student = require('../models/student');
 const { PDFDocument, rgb, degrees, StandardFonts } = require('pdf-lib');
 
 const techCoursesData = courseData.techCoursesData || [];
