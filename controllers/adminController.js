@@ -189,21 +189,30 @@ exports.deleteBatch = async (req, res) => {
 exports.grantPortalAccess = async (req, res) => {
     try {
         const student = await Student.findById(req.params.id);
-        if (!student) return res.status(404).json({ success: false, message: "Student not found" });
+        if (!student) {
+            return res.status(404).json({ success: false, message: "Student not found" });
+        }
 
-        student.isPortalActive = true; // Flips the switch
+        // Aligning with the frontend 'isApproved' check for portal access status
+        student.isApproved = true; 
+        
+        // If your schema strictly relies on isPortalActive, uncomment the line below 
+        // to sync both flags, or update the React frontend to check 'isPortalActive'.
+        // student.isPortalActive = true; 
+
         await student.save();
 
         await AuditLog.create({
             action: "Portal Access Activated",
-            performedBy: req.user?.username,
+            performedBy: req.user?.username || "System",
             targetName: student.name,
-            details: `Account enabled for ID: ${student.registrationId}`
+            details: `Account enabled manually/auto for ID: ${student._id}`
         });
 
-        res.json({ success: true, message: "Student portal activated" });
+        res.json({ success: true, message: "Student portal activated successfully" });
     } catch (err) {
-        res.status(500).json({ success: false });
+        console.error("Error granting portal access:", err);
+        res.status(500).json({ success: false, message: "Server Error during portal unlock" });
     }
 };
 
