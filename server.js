@@ -70,6 +70,7 @@ const connectDB = async () => {
 };
 connectDB();
 
+require('./controllers/cronJobs');
 // --- 5. ROUTES ---
 app.use('/api/auth', otpLimiter, require('./routes/authRoutes')); 
 app.use('/api/registration', require('./routes/registrationRoutes')); 

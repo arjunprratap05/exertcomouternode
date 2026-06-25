@@ -69,4 +69,6 @@ router.get('/whatsapp-chat/:phone', getWhatsAppChat);
 router.patch('/student/:id/ai-toggle', toggleAiControl);
 router.post('/send-whatsapp', sendManualWhatsAppMessage);
 
+router.post('/reports/dispatch-founder-report', adminController.dispatchFounderReport);
+
 module.exports = router;

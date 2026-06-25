@@ -78,6 +78,7 @@
     "mysql2": "^3.16.0",
     "named-placeholders": "^1.1.6",
     "negotiator": "^1.0.0",
+    "node-cron": "^4.5.0",
     "nodemailer": "^7.0.12",
     "object-assign": "^4.1.1",
     "object-inspect": "^1.13.4",

@@ -5,6 +5,7 @@ const Batch = require('../models/Batch');
 const jwt = require('jsonwebtoken');
 const Message = require('../models/Message');
 const { sendWhatsAppMessage } = require('../services/whatsappService');
+const nodemailer = require('nodemailer');
 // --- 1. ADMIN LOGIN ---
 exports.adminLogin = async (req, res) => {
     try {
@@ -490,4 +491,70 @@ exports.approvePayment = async (req, res) => {
     );
     
     res.json({ success: true });
+};
+
+exports.dispatchFounderReport = async (req, res) => {
+    try {
+        const { targetMonth, totalRevenue, topCourses, totalStudents, pendingQueue } = req.body;
+
+        // Note: Setup your environment variables for SMTP
+        const transporter = nodemailer.createTransport({
+            service: 'gmail', // or your preferred SMTP
+            auth: {
+                user: process.env.EMAIL_USER, 
+                pass: process.env.EMAIL_PASS
+            }
+        });
+
+        // Format the top courses list for the email
+        const coursesHtml = topCourses.map((c, i) => 
+            `<li><strong>${i + 1}. ${c.courseName}</strong> - Enrolls: ${c.enrollments} | Revenue: ₹${c.revenue.toLocaleString()}</li>`
+        ).join('');
+
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: process.env.FOUNDER_EMAILS, 
+            subject: `📊 Expert Academy Monthly Intelligence Report: ${targetMonth}`,
+            html: `
+                <div style="font-family: Arial, sans-serif; color: #1A5F7A; max-w: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+                    <div style="background-color: #F37021; padding: 20px; text-align: center;">
+                        <h2 style="color: white; margin: 0; font-style: italic;">EXPERT ACADEMY</h2>
+                        <p style="color: rgba(255,255,255,0.8); margin: 5px 0 0; text-transform: uppercase; font-size: 12px; letter-spacing: 2px;">Automated Market Intelligence</p>
+                    </div>
+                    
+                    <div style="padding: 30px;">
+                        <h3 style="border-bottom: 2px solid #f1f5f9; padding-bottom: 10px; margin-top: 0;">Period: ${targetMonth}</h3>
+                        
+                        <div style="display: flex; gap: 20px; margin-bottom: 30px;">
+                            <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; flex: 1;">
+                                <p style="font-size: 10px; text-transform: uppercase; color: #64748b; margin: 0;">Monthly Revenue</p>
+                                <p style="font-size: 24px; font-weight: bold; margin: 5px 0 0;">₹${totalRevenue.toLocaleString()}</p>
+                            </div>
+                            <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; flex: 1;">
+                                <p style="font-size: 10px; text-transform: uppercase; color: #64748b; margin: 0;">Total Students</p>
+                                <p style="font-size: 24px; font-weight: bold; margin: 5px 0 0;">${totalStudents}</p>
+                            </div>
+                        </div>
+
+                        <h4 style="color: #F37021; text-transform: uppercase;">Top Performing Programs</h4>
+                        <ul style="line-height: 1.8; color: #334155; background: #f8fafc; padding: 20px 40px; border-radius: 8px;">
+                            ${coursesHtml || "<li>No course data generated for this period.</li>"}
+                        </ul>
+                        
+                        <p style="font-size: 12px; color: #94a3b8; margin-top: 30px;">
+                            Pending verification queues: <strong>${pendingQueue}</strong>.<br/>
+                            Report generated automatically by the Admin Dashboard.
+                        </p>
+                    </div>
+                </div>
+            `
+        };
+
+        await transporter.sendMail(mailOptions);
+
+        res.status(200).json({ success: true, message: "Report dispatched successfully" });
+    } catch (error) {
+        console.error("Report Dispatch Error:", error);
+        res.status(500).json({ success: false, message: "Failed to dispatch report" });
+    }
 };
