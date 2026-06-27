@@ -116,3 +116,13 @@ exports.downloadMaterial = async (req, res) => {
         res.status(500).json({ success: false, message: "Failed to process resource" });
     }
 };
+
+exports.getAllLectures = async (req, res) => {
+    try {
+        const lectures = await Lecture.find({}).sort({ createdAt: -1 });
+        res.status(200).json({ success: true, data: lectures });
+    } catch (error) {
+        console.error("Error fetching lectures:", error);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+};
