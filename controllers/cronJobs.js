@@ -1,7 +1,7 @@
 const cron = require('node-cron');
 const nodemailer = require('nodemailer');
 const ExcelJS = require('exceljs'); // Added Excel library
-const Student = require('../models/Student'); // Update this path if needed
+const Student = require('../models/student'); // Update this path if needed
 
 // Run every day at 23:50 (11:50 PM)
 cron.schedule('50 23 * * *', async () => {
