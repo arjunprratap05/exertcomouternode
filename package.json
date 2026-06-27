@@ -36,6 +36,7 @@
     "es-set-tostringtag": "^2.1.0",
     "escape-html": "^1.0.3",
     "etag": "^1.8.1",
+    "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
     "finalhandler": "^2.1.1",

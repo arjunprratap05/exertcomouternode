@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const nodemailer = require('nodemailer');
-const Student = require('../models/student');// Update this path to your actual Student model
+const ExcelJS = require('exceljs'); // Added Excel library
+const Student = require('../models/Student'); // Update this path if needed
 
 // Run every day at 23:50 (11:50 PM)
 cron.schedule('50 23 * * *', async () => {
@@ -27,14 +28,12 @@ async function compileAndSendAutomatedReport() {
         let pendingQueue = 0;
         const stats = {};
 
-        // 2. Aggregate Data (Replicating your frontend logic on the backend)
+        // 2. Aggregate Data for Email Summary
         students.forEach(student => {
-            // Count pending adjustments
             if (student.discountRequest?.status === 'PENDING') {
                 pendingQueue += 1;
             }
 
-            // Normalize enrollments
             let enrolls = student.enrollments && student.enrollments.length > 0 
                 ? student.enrollments 
                 : [];
@@ -43,11 +42,10 @@ async function compileAndSendAutomatedReport() {
                 enrolls.push({
                     course: student.course,
                     amountPaid: student.amountPaid || 0,
-                    enrolledAt: student.createdAt
+                    enrolledAt: student.createdAt || student.date
                 });
             }
 
-            // Calculate Revenue and Top Courses
             enrolls.forEach(en => {
                 const amt = Number(en.amountPaid) || Number(student.amountPaid) || 0;
                 totalRevenue += amt;
@@ -62,7 +60,6 @@ async function compileAndSendAutomatedReport() {
             });
         });
 
-        // 3. Format Top Courses
         const topCoursesData = Object.entries(stats)
             .map(([courseName, data]) => ({ courseName, ...data }))
             .sort((a, b) => b.enrollments - a.enrollments)
@@ -72,7 +69,55 @@ async function compileAndSendAutomatedReport() {
             `<li><strong>${i + 1}. ${c.courseName}</strong> - Enrolls: ${c.enrollments} | Revenue: ₹${c.revenue.toLocaleString()}</li>`
         ).join('');
 
-        // 4. Dispatch Email
+
+        // --- 3. GENERATE FORMATTED EXCEL REPORT ---
+        const workbook = new ExcelJS.Workbook();
+        const sheet = workbook.addWorksheet(`Registry_${targetMonth}`);
+
+        // Define Columns
+        sheet.columns = [
+            { header: 'Profile Identity', key: 'name', width: 25 },
+            { header: 'Phone Number', key: 'phone', width: 15 },
+            { header: 'Enrolled Program(s)', key: 'course', width: 40 },
+            { header: 'Total Revenue (₹)', key: 'revenue', width: 18, style: { numFmt: '₹#,##0.00' } },
+            { header: 'Portal Status', key: 'status', width: 15 },
+            { header: 'Registration Date', key: 'date', width: 20 }
+        ];
+
+        // Format the Header Row (Blue background, White text)
+        sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5F7A' } };
+        sheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
+
+        // Populate Data Rows
+        students.forEach(student => {
+            let coursesList = [];
+            let studentTotalPaid = 0;
+
+            const enrolls = student.enrollments && student.enrollments.length > 0 
+                ? student.enrollments 
+                : (student.course ? [{ course: student.course, amountPaid: student.amountPaid }] : []);
+
+            enrolls.forEach(en => {
+                if (en.course) coursesList.push(en.course);
+                studentTotalPaid += (Number(en.amountPaid) || Number(student.amountPaid) || 0);
+            });
+
+            sheet.addRow({
+                name: student.name || 'N/A',
+                phone: student.phone || 'N/A',
+                course: coursesList.join(', ') || 'General Enquiry',
+                revenue: studentTotalPaid,
+                status: student.isApproved ? 'ACTIVE' : 'INACTIVE',
+                date: new Date(student.createdAt || student.date || Date.now()).toLocaleDateString()
+            });
+        });
+
+        // Convert the Excel file to a Memory Buffer
+        const buffer = await workbook.xlsx.writeBuffer();
+
+
+        // --- 4. DISPATCH EMAIL WITH EXCEL ATTACHMENT ---
         const transporter = nodemailer.createTransport({
             service: 'gmail',
             auth: {
@@ -83,19 +128,22 @@ async function compileAndSendAutomatedReport() {
 
         const mailOptions = {
             from: process.env.EMAIL_USER,
-            to: process.env.FOUNDER_EMAILS, // Pulls the comma-separated emails from .env
-            subject: `📊 [AUTOMATED] Monthly Intelligence Report: ${targetMonth}`,
+            to: process.env.FOUNDER_EMAILS, // Auto-sends to all comma-separated emails
+            subject: `📊 Expert Academy Detailed Intelligence Report: ${targetMonth}`,
             html: `
                 <div style="font-family: Arial, sans-serif; color: #1A5F7A; max-w: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
                     <div style="background-color: #F37021; padding: 20px; text-align: center;">
                         <h2 style="color: white; margin: 0; font-style: italic;">EXPERT ACADEMY</h2>
-                        <p style="color: rgba(255,255,255,0.8); margin: 5px 0 0; text-transform: uppercase; font-size: 12px; letter-spacing: 2px;">Automated Market Intelligence</p>
+                        <p style="color: rgba(255,255,255,0.8); margin: 5px 0 0; text-transform: uppercase; font-size: 12px; letter-spacing: 2px;">Automated Market Intelligence & Ledger</p>
                     </div>
                     
                     <div style="padding: 30px;">
                         <h3 style="border-bottom: 2px solid #f1f5f9; padding-bottom: 10px; margin-top: 0;">Period: ${targetMonth}</h3>
                         
-                        <div style="display: flex; gap: 20px; margin-bottom: 30px;">
+                        <p>Dear Founder,</p>
+                        <p>Please find the automated monthly intelligence summary below. <strong>A detailed, formatted Excel ledger containing full student records for this period is attached to this email.</strong></p>
+
+                        <div style="display: flex; gap: 20px; margin-bottom: 30px; margin-top: 20px;">
                             <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; flex: 1;">
                                 <p style="font-size: 10px; text-transform: uppercase; color: #64748b; margin: 0;">Monthly Revenue</p>
                                 <p style="font-size: 24px; font-weight: bold; margin: 5px 0 0;">₹${totalRevenue.toLocaleString()}</p>
@@ -117,11 +165,18 @@ async function compileAndSendAutomatedReport() {
                         </p>
                     </div>
                 </div>
-            `
+            `,
+            attachments: [
+                {
+                    filename: `ExpertAcademy_Ledger_${targetMonth}.xlsx`,
+                    content: buffer,
+                    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                }
+            ]
         };
 
         await transporter.sendMail(mailOptions);
-        console.log("Automated Monthly Report Dispatched Successfully.");
+        console.log("Detailed report with Excel attachment dispatched successfully.");
 
     } catch (error) {
         console.error("Automated Report Dispatch Error:", error);
