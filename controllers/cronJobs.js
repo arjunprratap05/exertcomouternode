@@ -1,34 +1,29 @@
-const cron = require('node-cron');
 const nodemailer = require('nodemailer');
-const ExcelJS = require('exceljs'); // Added Excel library
-const Student = require('../models/student'); // Update this path if needed
+const ExcelJS = require('exceljs');
+const Student = require('../models/student'); 
 
-// Run every day at 23:50 (11:50 PM)
-cron.schedule('50 23 * * *', async () => {
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    // If tomorrow is the 1st, today is the last day of the month
-    if (tomorrow.getDate() === 1) {
-        console.log("Last day of the month detected. Compiling and dispatching automated Founder Report...");
-        await compileAndSendAutomatedReport();
-    }
-});
-
-async function compileAndSendAutomatedReport() {
+// We export this as a standard API route handler now
+exports.triggerMonthlyReport = async (req, res) => {
     try {
-        const now = new Date();
-        const targetMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const today = new Date();
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
 
-        // 1. Fetch all students from the DB
+        // Security/Logic Check: Only run if tomorrow is the 1st
+        if (tomorrow.getDate() !== 1) {
+            return res.status(200).json({ message: "Not the last day of the month. Skipped." });
+        }
+
+        console.log("Last day of the month detected. Compiling and dispatching automated Founder Report...");
+        
+        const targetMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
         const students = await Student.find({});
         
         let totalRevenue = 0;
         let pendingQueue = 0;
         const stats = {};
 
-        // 2. Aggregate Data for Email Summary
+        // Aggregate Data
         students.forEach(student => {
             if (student.discountRequest?.status === 'PENDING') {
                 pendingQueue += 1;
@@ -69,12 +64,10 @@ async function compileAndSendAutomatedReport() {
             `<li><strong>${i + 1}. ${c.courseName}</strong> - Enrolls: ${c.enrollments} | Revenue: ₹${c.revenue.toLocaleString()}</li>`
         ).join('');
 
-
-        // --- 3. GENERATE FORMATTED EXCEL REPORT ---
+        // Generate Excel File
         const workbook = new ExcelJS.Workbook();
         const sheet = workbook.addWorksheet(`Registry_${targetMonth}`);
 
-        // Define Columns
         sheet.columns = [
             { header: 'Profile Identity', key: 'name', width: 25 },
             { header: 'Phone Number', key: 'phone', width: 15 },
@@ -84,12 +77,10 @@ async function compileAndSendAutomatedReport() {
             { header: 'Registration Date', key: 'date', width: 20 }
         ];
 
-        // Format the Header Row (Blue background, White text)
         sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
         sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5F7A' } };
         sheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
 
-        // Populate Data Rows
         students.forEach(student => {
             let coursesList = [];
             let studentTotalPaid = 0;
@@ -113,11 +104,9 @@ async function compileAndSendAutomatedReport() {
             });
         });
 
-        // Convert the Excel file to a Memory Buffer
         const buffer = await workbook.xlsx.writeBuffer();
 
-
-        // --- 4. DISPATCH EMAIL WITH EXCEL ATTACHMENT ---
+        // Dispatch Email
         const transporter = nodemailer.createTransport({
             service: 'gmail',
             auth: {
@@ -128,7 +117,7 @@ async function compileAndSendAutomatedReport() {
 
         const mailOptions = {
             from: process.env.EMAIL_USER,
-            to: process.env.FOUNDER_EMAILS, // Auto-sends to all comma-separated emails
+            to: process.env.FOUNDER_EMAILS,
             subject: `📊 Expert Academy Detailed Intelligence Report: ${targetMonth}`,
             html: `
                 <div style="font-family: Arial, sans-serif; color: #1A5F7A; max-w: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
@@ -177,8 +166,11 @@ async function compileAndSendAutomatedReport() {
 
         await transporter.sendMail(mailOptions);
         console.log("Detailed report with Excel attachment dispatched successfully.");
+        
+        return res.status(200).json({ success: true, message: "Automated Report Sent Successfully" });
 
     } catch (error) {
         console.error("Automated Report Dispatch Error:", error);
+        return res.status(500).json({ success: false, error: error.message });
     }
 }

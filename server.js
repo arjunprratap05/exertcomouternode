@@ -6,6 +6,7 @@ const helmet = require('helmet');
 const dns = require('node:dns');
 const http = require('http'); 
 const { Server } = require('socket.io'); 
+const cronController = require('./controllers/cronJobs');
 
 // --- THE VERCEL FIX: Only run dotenv in local development ---
 if (process.env.NODE_ENV !== 'production') {
@@ -80,6 +81,7 @@ app.use('/api/assistant', require('./routes/assistantRoutes'));
 app.use('/api/lms', require('./routes/lmsRoutes'));
 app.use('/api', require('./routes/quizRoutes'));
 app.use('/api/whatsapp', require('./routes/whatsappRoutes'));
+app.get('/api/cron/monthly-report', cronController.triggerMonthlyReport);
 
 // Health Check
 app.get('/', (req, res) => {
