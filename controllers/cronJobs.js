@@ -1,40 +1,36 @@
 const nodemailer = require('nodemailer');
 const ExcelJS = require('exceljs');
 const Student = require('../models/student'); 
-const Enquiry = require('../models/Inquiry'); // Double check this path (could be /enquiry)
-const Coupon = require('../models/Coupon');   // Double check this path
-const Batch = require('../models/Batch');     // Double check this path
+const Enquiry = require('../models/inquiry'); 
+const Coupon = require('../models/coupon');   
+const Batch = require('../models/batch');     
 
-// We export this as a standard API route handler now
 exports.triggerMonthlyReport = async (req, res) => {
     try {
         const today = new Date();
         const tomorrow = new Date(today);
         tomorrow.setDate(tomorrow.getDate() + 1);
 
-        // Security/Logic Check: Only run if tomorrow is the 1st
-        // (TEMPORARILY COMMENTED OUT FOR TESTING - UNCOMMENT IN PRODUCTION)
-        // if (tomorrow.getDate() !== 1) {
-        //     return res.status(200).json({ message: "Not the last day of the month. Skipped." });
-        // }
+        if (tomorrow.getDate() !== 1) {
+            console.log("Not the last day of the month. Skipped.");
+            return res.status(200).json({ message: "Not the last day of the month. Skipped." });
+        }
 
-        console.log("Compiling multi-sheet master ledger and dispatching automated Founder Report...");
+        console.log("Last day of the month detected. Compiling multi-sheet master ledger and dispatching automated Founder Report...");
         
         const targetMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
         
-        // 1. Fetch ALL data from the database simultaneously
         const [students, enquiries, coupons, batches] = await Promise.all([
             Student.find({}),
             Enquiry.find({}),
             Coupon.find({}),
-            Batch.find({ isActive: true }) // Fetching only active batches, remove filter if you want all
+            Batch.find({ isActive: true })
         ]);
         
         let totalRevenue = 0;
         let pendingQueue = 0;
         const stats = {};
 
-        // 2. Aggregate Data for Email Body
         students.forEach(student => {
             if (student.discountRequest?.status === 'PENDING') {
                 pendingQueue += 1;
@@ -75,18 +71,14 @@ exports.triggerMonthlyReport = async (req, res) => {
             `<li><strong>${i + 1}. ${c.courseName}</strong> - Enrolls: ${c.enrollments} | Revenue: ₹${c.revenue.toLocaleString()}</li>`
         ).join('');
 
-
-        // --- 3. GENERATE MULTI-SHEET EXCEL REPORT ---
         const workbook = new ExcelJS.Workbook();
 
-        // Helper function to format the header row of every sheet consistently
         const styleHeaderRow = (sheet) => {
             sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
             sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5F7A' } };
             sheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
         };
 
-        // --- SHEET 1: STUDENT REGISTRY ---
         const sheetRegistry = workbook.addWorksheet('Registrations');
         sheetRegistry.columns = [
             { header: 'Profile Identity', key: 'name', width: 25 },
@@ -119,7 +111,6 @@ exports.triggerMonthlyReport = async (req, res) => {
             });
         });
 
-        // --- SHEET 2: WEB LEADS / ENQUIRIES ---
         const sheetLeads = workbook.addWorksheet('Web Leads');
         sheetLeads.columns = [
             { header: 'Lead Identity', key: 'name', width: 25 },
@@ -142,7 +133,6 @@ exports.triggerMonthlyReport = async (req, res) => {
             });
         });
 
-        // --- SHEET 3: COUPONS ---
         const sheetCoupons = workbook.addWorksheet('Coupons');
         sheetCoupons.columns = [
             { header: 'Campaign Narrative', key: 'desc', width: 40 },
@@ -167,7 +157,6 @@ exports.triggerMonthlyReport = async (req, res) => {
             });
         });
 
-        // --- SHEET 4: ACTIVE BATCHES ---
         const sheetBatches = workbook.addWorksheet('Active Batches');
         sheetBatches.columns = [
             { header: 'Batch Code', key: 'code', width: 20 },
@@ -186,10 +175,8 @@ exports.triggerMonthlyReport = async (req, res) => {
             });
         });
 
-        // Convert the Excel file to a Memory Buffer
         const buffer = await workbook.xlsx.writeBuffer();
 
-        // --- 4. DISPATCH EMAIL WITH EXCEL ATTACHMENT ---
         const transporter = nodemailer.createTransport({
             service: 'gmail',
             auth: {
