@@ -1,9 +1,9 @@
 const nodemailer = require('nodemailer');
 const ExcelJS = require('exceljs');
 const Student = require('../models/student'); 
-const Enquiry = require('../models/inquiry'); 
-const Coupon = require('../models/coupon');   
-const Batch = require('../models/batch');     
+const Enquiry = require('../models/Inquiry'); 
+const Coupon = require('../models/Coupon');   
+const Batch = require('../models/Batch');     
 
 exports.triggerMonthlyReport = async (req, res) => {
     try {
