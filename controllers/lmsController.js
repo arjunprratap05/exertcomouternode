@@ -126,3 +126,13 @@ exports.getAllLectures = async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 };
+
+exports.deleteMaterial = async (req, res) => {
+    try {
+        const material = await Material.findByIdAndDelete(req.params.id);
+        if (!material) return res.status(404).json({ success: false, message: "Not found" });
+        res.json({ success: true, message: "Resource wiped from Vault" });
+    } catch (err) {
+        res.status(500).json({ success: false });
+    }
+};
