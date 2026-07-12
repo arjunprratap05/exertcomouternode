@@ -4,6 +4,7 @@ const multer = require('multer');
 const lmsController = require('../controllers/lmsController');
 const { authMiddleware, authorize } = require('../middleware/authMiddleware');
 
+
 // 1. INITIALIZE VARIABLES FIRST
 const staffAccess = authorize('founder', 'accounts', 'frontoffice');
 const adminAccess = authorize('founder', 'frontoffice', 'accounts');
@@ -22,6 +23,7 @@ router.get('/lectures', authMiddleware, staffAccess, (req, res, next) => lmsCont
 router.delete('/delete-lecture/:id', authMiddleware, staffAccess, (req, res, next) => lmsController.deleteLecture(req, res, next));
 router.get('/materials', authMiddleware, staffAccess, (req, res, next) => lmsController.getAllMaterials(req, res, next));
 router.delete('/delete-material/:id', authMiddleware, staffAccess, (req, res, next) => lmsController.deleteMaterial(req, res, next));
+router.post('/chat', lmsController.handleStudentChat);
 
 // --- STUDENT ROUTES ---
 router.get('/download/:id', 

@@ -136,3 +136,56 @@ exports.deleteMaterial = async (req, res) => {
         res.status(500).json({ success: false });
     }
 };
+
+const axios = require('axios');
+
+exports.handleStudentChat = async (req, res) => {
+    try {
+        const { message } = req.body;
+
+        if (!message) {
+            return res.status(400).json({ 
+                success: false, 
+                error: "Message is required." 
+            });
+        }
+
+        console.log(`[AI] Processing student query: "${message}"`);
+
+        // Connect to Tavily's Live Research API
+        const response = await axios.post('https://api.tavily.com/search', {
+            api_key: process.env.TAVILY_API_KEY,
+            query: message,
+            search_depth: "basic",
+            include_answer: true, // Forces Tavily to synthesize a conversational answer
+            max_results: 3
+        });
+
+        const data = response.data;
+        
+        // Extract Tavily's AI-generated answer
+        let aiResponse = data.answer;
+
+        // Fallback: If Tavily couldn't generate a definitive answer, summarize the top snippets
+        if (!aiResponse) {
+            if (data.results && data.results.length > 0) {
+                aiResponse = "I couldn't formulate a direct answer, but here is what I found in my live research:\n\n" + 
+                             data.results.map((r, index) => `${index + 1}. ${r.content}`).join("\n\n");
+            } else {
+                aiResponse = "I'm sorry, but I couldn't find accurate information regarding that topic in my live database.";
+            }
+        }
+
+        return res.status(200).json({ 
+            success: true, 
+            response: aiResponse 
+        });
+
+    } catch (error) {
+        console.error("Tavily AI Engine Error:", error.response?.data || error.message);
+        return res.status(500).json({ 
+            success: false, 
+            error: "The AI Research Engine is currently experiencing high load. Please try again." 
+        });
+    }
+};
