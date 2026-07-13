@@ -5,7 +5,7 @@ const Batch = require('../models/Batch');
 const courseData = require('../data/course'); 
 const Student = require('../models/student');
 const { PDFDocument, rgb, degrees, StandardFonts } = require('pdf-lib');
-
+const axios = require('axios');
 const techCoursesData = courseData.techCoursesData || [];
 const universityPrograms = courseData.universityPrograms || [];
 const allConfiguredCourses = [...techCoursesData, ...universityPrograms];
@@ -137,55 +137,53 @@ exports.deleteMaterial = async (req, res) => {
     }
 };
 
-const axios = require('axios');
 
 exports.handleStudentChat = async (req, res) => {
     try {
         const { message } = req.body;
 
         if (!message) {
-            return res.status(400).json({ 
-                success: false, 
-                error: "Message is required." 
-            });
+            return res.status(400).json({ success: false, error: "Message is required." });
         }
 
         console.log(`[AI] Processing student query: "${message}"`);
+
+        // 1. SMART DETECTION: Check if the student is asking for visual aids
+        const wantsDiagram = /(diagram|image|picture|visual|draw|graph|chart|architecture)/i.test(message);
 
         // Connect to Tavily's Live Research API
         const response = await axios.post('https://api.tavily.com/search', {
             api_key: process.env.TAVILY_API_KEY,
             query: message,
             search_depth: "basic",
-            include_answer: true, // Forces Tavily to synthesize a conversational answer
+            include_answer: true, 
+            include_images: wantsDiagram, // 2. Tell Tavily to scrape images if requested
             max_results: 3
         });
 
-        const data = response.data;
+        let aiResponse = response.data.answer;
         
-        // Extract Tavily's AI-generated answer
-        let aiResponse = data.answer;
+        // 3. Extract the images array (Default to empty array if none found)
+        let aiImages = response.data.images || [];
 
-        // Fallback: If Tavily couldn't generate a definitive answer, summarize the top snippets
         if (!aiResponse) {
-            if (data.results && data.results.length > 0) {
+            if (response.data.results && response.data.results.length > 0) {
                 aiResponse = "I couldn't formulate a direct answer, but here is what I found in my live research:\n\n" + 
-                             data.results.map((r, index) => `${index + 1}. ${r.content}`).join("\n\n");
+                             response.data.results.map((r, index) => `${index + 1}. ${r.content}`).join("\n\n");
             } else {
                 aiResponse = "I'm sorry, but I couldn't find accurate information regarding that topic in my live database.";
             }
         }
 
+        // 4. Return both the text and a max of 2 images to the frontend
         return res.status(200).json({ 
             success: true, 
-            response: aiResponse 
+            response: aiResponse,
+            images: aiImages.slice(0, 2) // Limit to top 2 images to keep the chat UI clean
         });
 
     } catch (error) {
         console.error("Tavily AI Engine Error:", error.response?.data || error.message);
-        return res.status(500).json({ 
-            success: false, 
-            error: "The AI Research Engine is currently experiencing high load. Please try again." 
-        });
+        return res.status(500).json({ success: false, error: "The AI Research Engine is currently experiencing high load. Please try again." });
     }
 };
