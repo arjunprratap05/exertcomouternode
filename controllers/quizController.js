@@ -1,6 +1,7 @@
 const { Quiz, QuizAttempt } = require('../models/Quiz');
 const AuditLog = require('../models/AuditLog');
-
+const pdfParse = require('pdf-parse');
+const axios = require('axios');
  // [ADMIN] Create a new quiz with answers & log it
 exports.createQuiz = async (req, res) => {
     try {
@@ -239,5 +240,95 @@ exports.toggleQuizStatus = async (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.generateQuizFromPdf = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: "No PDF file provided." });
+        }
+
+        console.log("[AI Quiz] Parsing PDF Document...");
+
+        const pdfData = await pdfParse(req.file.buffer);
+        let extractedText = pdfData.text.replace(/\s+/g, ' ').trim();
+
+        // 1. Ultra-short topic hint (60 chars)
+        const topicHint = extractedText.substring(0, 60).replace(/[^a-zA-Z0-9 ]/g, " ").trim();
+
+        console.log(`[AI Quiz] Querying Tavily for topic: ${topicHint}...`);
+
+        // 2. SHORTENED PROMPT
+        const searchQuery = `Create 3 short MCQs on: ${topicHint}. Output ONLY valid JSON: {"questions":[{"question":"Q","options":["A","B","C","D"],"correctIndex":0}]}`;
+
+        // 3. Prompt Tavily
+        const response = await axios.post('https://api.tavily.com/search', {
+            api_key: process.env.TAVILY_API_KEY,
+            query: searchQuery,
+            search_depth: "basic",
+            include_answer: true,
+            max_results: 1
+        });
+
+        let aiAnswer = response.data.answer;
+
+        if (!aiAnswer) {
+            throw new Error("Tavily failed to generate an answer.");
+        }
+
+        // 4. AGGRESSIVE CLEANING
+        let cleanJson = aiAnswer.replace(/```json/gi, '').replace(/```/g, '').trim();
+        
+        const startIndex = cleanJson.indexOf('{');
+        const endIndex = cleanJson.lastIndexOf('}');
+        
+        if (startIndex === -1 || endIndex === -1) {
+            throw new Error("Invalid JSON structure returned by AI.");
+        }
+        
+        cleanJson = cleanJson.substring(startIndex, endIndex + 1);
+        cleanJson = cleanJson.replace(/[\n\r\t]+/g, ' '); 
+        cleanJson = cleanJson.replace(/}\s*{/g, '},{'); 
+        cleanJson = cleanJson.replace(/,\s*([\]}])/g, '$1'); 
+
+        // 5. SMART PARSING & AUTO-HEALER
+        let parsedData;
+        try {
+            // First, try to parse the perfectly fine JSON
+            parsedData = JSON.parse(cleanJson);
+        } catch (parseError) {
+            // If it crashes, THEN we trigger the auto-healer
+            console.log("[AI Quiz] JSON Parse failed. Engaging Auto-Healer...");
+            try {
+                const lastCompleteObjectEnd = cleanJson.lastIndexOf('}');
+                let healedJson = cleanJson.substring(0, lastCompleteObjectEnd + 1) + ']}';
+                parsedData = JSON.parse(healedJson);
+                console.log("[AI Quiz] Auto-Healer successfully recovered the data.");
+            } catch (healError) {
+                console.error("[AI Quiz] Auto-Healer Failed. Cleaned String:", cleanJson);
+                throw new Error("The AI returned badly formatted text.");
+            }
+        }
+
+        // 6. Inject the empty 'explanation' field back in so your React frontend doesn't break
+        const formattedQuestions = parsedData.questions.map(q => ({
+            question: q.question,
+            options: q.options,
+            correctIndex: q.correctIndex,
+            explanation: q.explanation || "" 
+        }));
+
+        return res.status(200).json({ 
+            success: true, 
+            questions: formattedQuestions 
+        });
+
+    } catch (error) {
+        console.error("Tavily API Error:", error.response?.data || error.message);
+        return res.status(500).json({ 
+            success: false, 
+            message: "The AI request failed to format properly. Please click 'Generate' again!" 
+        });
     }
 };

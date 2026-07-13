@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
 const quizController = require('../controllers/quizController');
 
 // Import your custom RBAC middleware
@@ -60,5 +62,8 @@ router.patch(
     authorize('founder', 'accounts', 'frontoffice'), 
     quizController.toggleQuizStatus
 );
+
+router.post('/quizzes/generate-from-pdf', upload.single('document'), quizController.generateQuizFromPdf);
+
 
 module.exports = router;
