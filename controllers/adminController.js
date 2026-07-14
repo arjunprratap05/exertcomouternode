@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const Message = require('../models/Message');
 const { sendWhatsAppMessage } = require('../services/whatsappService');
 const nodemailer = require('nodemailer');
+const axios = require('axios');
 // --- 1. ADMIN LOGIN ---
 exports.adminLogin = async (req, res) => {
     try {
@@ -556,5 +557,48 @@ exports.dispatchFounderReport = async (req, res) => {
     } catch (error) {
         console.error("Report Dispatch Error:", error);
         res.status(500).json({ success: false, message: "Failed to dispatch report" });
+    }
+};
+
+exports.handleAdminChat = async (req, res) => {
+    try {
+        const { message } = req.body;
+
+        if (!message) {
+            return res.status(400).json({ success: false, error: "Message is required." });
+        }
+
+        console.log(`[Admin AI] Processing command: "${message}"`);
+
+        const wantsDiagram = /(diagram|image|picture|visual|draw|graph|chart|architecture)/i.test(message);
+
+        // THE EXECUTIVE PROMPT: Notice how we prepend a strict persona to the admin's query
+        const adminPersonaQuery = `Act as an Executive Admin Assistant for an educational institute. The administrator is asking you to do this task: "${message}". Respond professionally and practically.`;
+
+        const response = await axios.post('https://api.tavily.com/search', {
+            api_key: process.env.TAVILY_API_KEY,
+            query: adminPersonaQuery,
+            search_depth: "advanced", // Use advanced depth for better admin analysis
+            include_answer: true, 
+            include_images: wantsDiagram,
+            max_results: 3
+        });
+
+        let aiResponse = response.data.answer;
+        let aiImages = response.data.images || [];
+
+        if (!aiResponse) {
+            aiResponse = "Co-Pilot Error: I am unable to compute that request with current database access.";
+        }
+
+        return res.status(200).json({ 
+            success: true, 
+            response: aiResponse,
+            images: aiImages.slice(0, 2)
+        });
+
+    } catch (error) {
+        console.error("Admin Tavily Engine Error:", error.response?.data || error.message);
+        return res.status(500).json({ success: false, error: "The Co-Pilot engine is currently offline." });
     }
 };

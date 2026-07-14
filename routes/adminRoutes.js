@@ -5,6 +5,7 @@ const couponController = require('../controllers/couponController');
 const { authMiddleware, authorize } = require('../middleware/authMiddleware');
 const { getWhatsAppLeads,getWhatsAppChat,toggleAiControl,sendManualWhatsAppMessage} = require('../controllers/adminController');
 
+
 router.post('/login', adminController.adminLogin);
 
 router.get('/registrations', authMiddleware, adminController.getAllStudents);
@@ -70,5 +71,7 @@ router.patch('/student/:id/ai-toggle', toggleAiControl);
 router.post('/send-whatsapp', sendManualWhatsAppMessage);
 
 router.post('/reports/dispatch-founder-report', adminController.dispatchFounderReport);
+
+router.post('/chat', adminController.handleAdminChat);
 
 module.exports = router;
