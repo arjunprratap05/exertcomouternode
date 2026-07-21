@@ -7,19 +7,20 @@ const Message = require('../models/Message');
 const { sendWhatsAppMessage } = require('../services/whatsappService');
 const nodemailer = require('nodemailer');
 const axios = require('axios');
+const Coupon = require('../models/Coupon'); 
+const pdfParse = require('pdf-parse'); 
+
 // --- 1. ADMIN LOGIN ---
 exports.adminLogin = async (req, res) => {
     try {
         const { username, password } = req.body;
         let role = null;
         
-        // Environment Variable Check
         if (username === process.env.FOUNDER_USER && password === process.env.FOUNDER_PASS) role = 'founder';
         else if (username === process.env.ACCOUNTS_USER && password === process.env.ACCOUNTS_PASS) role = 'accounts';
         else if (username === process.env.FRONTOFFICE_USER && password === process.env.FRONTOFFICE_PASS) role = 'frontoffice';
 
         if (role) {
-            // Include role in token
             const token = jwt.sign({ role, username }, process.env.JWT_SECRET, { expiresIn: '12h' });
             return res.json({ success: true, token, role });
         }
@@ -41,7 +42,7 @@ exports.updateStudentPayment = async (req, res) => {
 
         await AuditLog.create({
             action: "Payment Updated",
-            performedBy: req.user?.role?.toUpperCase(), // Changed req.admin to req.user
+            performedBy: req.user?.role?.toUpperCase(), 
             targetName: student.name,
             details: `Received ₹${paymentLog?.amount || 0} via ${paymentLog?.mode || 'N/A'}`
         });
@@ -60,7 +61,7 @@ exports.updateEnquiryStatus = async (req, res) => {
 
         await AuditLog.create({
             action: enrolled ? "Lead Conversion" : "Lead Rejected",
-            performedBy: req.user?.role?.toUpperCase(), // Changed req.admin to req.user
+            performedBy: req.user?.role?.toUpperCase(), 
             targetName: inquiry.name,
             details: enrolled ? "Converted to student" : `Reason: ${reason || 'N/A'}`
         });
@@ -82,12 +83,11 @@ exports.getAuditLogs = async (req, res) => {
 exports.approveStudent = async (req, res) => {
     try {
         const { id } = req.params;
-        const { transactionId } = req.body; // Sent from frontend verify button
+        const { transactionId } = req.body; 
         
         const student = await Student.findById(id);
         if (!student) return res.status(404).json({ message: "Student not found" });
 
-        // 1. Check if we are approving a specific enrollment in the array
         if (transactionId && student.enrollments && student.enrollments.length > 0) {
             const enrollIndex = student.enrollments.findIndex(e => e.transactionId === transactionId);
             
@@ -97,12 +97,9 @@ exports.approveStudent = async (req, res) => {
             }
         }
 
-        // 2. Sync with Legacy Fields (Ensure UI stays consistent)
-        // If this is the first/only enrollment being verified, unlock the portal
         student.isApproved = true;
         student.isPortalActive = true;
         
-        // 3. Save with validation disabled to prevent "Missing Field" errors from old data
         await student.save({ validateBeforeSave: false });
 
         res.status(200).json({ success: true, message: "Verification Successful" });
@@ -111,6 +108,7 @@ exports.approveStudent = async (req, res) => {
         res.status(500).json({ message: "Internal Server Error" });
     }
 };
+
 // --- 6. DATA FETCHERS ---
 exports.getAllStudents = async (req, res) => {
     try {
@@ -142,12 +140,11 @@ exports.createBatch = async (req, res) => {
     try {
         const batchData = {
             ...req.body,
-            lastModifiedBy: req.user.username // Extracted from JWT
+            lastModifiedBy: req.user.username 
         };
         const newBatch = new Batch(batchData);
         await newBatch.save();
         
-        // Log to Audit System
         await AuditLog.create({
             action: "Batch Created",
             performedBy: req.user.role.toUpperCase(),
@@ -161,7 +158,6 @@ exports.createBatch = async (req, res) => {
     }
 };
 
-// Get Batches for AddLecture Dropdown
 exports.getActiveBatches = async (req, res) => {
     try {
         const batches = await Batch.find({ active: true }).sort({ createdAt: -1 });
@@ -176,7 +172,6 @@ exports.deleteBatch = async (req, res) => {
         const batchId = req.params.id;
         await Batch.findByIdAndDelete(batchId);
 
-        // AUTO-CLEANUP: If a batch is deleted, remove it from all students
         await Student.updateMany(
             {}, 
             { $pull: { activeBatches: batchId } }
@@ -195,13 +190,7 @@ exports.grantPortalAccess = async (req, res) => {
             return res.status(404).json({ success: false, message: "Student not found" });
         }
 
-        // Aligning with the frontend 'isApproved' check for portal access status
         student.isApproved = true; 
-        
-        // If your schema strictly relies on isPortalActive, uncomment the line below 
-        // to sync both flags, or update the React frontend to check 'isPortalActive'.
-        // student.isPortalActive = true; 
-
         await student.save();
 
         await AuditLog.create({
@@ -237,19 +226,15 @@ exports.updateLedger = async (req, res) => {
             return res.status(404).json({ success: false, message: "Student not found" });
         }
 
-        // --- FIXED LOGIC START ---
-        // 1. Get the name or fallback to the Role (Founder/Accounts)
-        // 2. We capitalize the first letter to make it look professional in the dashboard
         const userRole = req.user.role ? req.user.role.charAt(0).toUpperCase() + req.user.role.slice(1) : "Admin";
         const adminIdentifier = req.user.name || userRole;
 
         const newLog = new AuditLog({
-            performedBy: adminIdentifier, // This will now show "Founder" or "Accounts"
+            performedBy: adminIdentifier, 
             action: auditAction || "Ledger Updated",
             targetName: targetName || updatedStudent.name,
             timestamp: new Date()
         });
-        // --- FIXED LOGIC END ---
 
         await newLog.save();
 
@@ -282,7 +267,6 @@ exports.requestDiscount = async (req, res) => {
             { new: true }
         );
 
-        // Log the request in the Audit system
         await AuditLog.create({
             performedBy: req.user.role.toUpperCase(),
             action: `Discount Requested: ₹${amount}`,
@@ -296,12 +280,10 @@ exports.requestDiscount = async (req, res) => {
     }
 };
 
-// ACTION: Founder Approves and actually changes the Total Fee
 exports.approveDiscount = async (req, res) => {
     try {
         const { id } = req.params;
         
-        // Security Check: Ensure only Founder can call this
         if (req.user.role !== 'founder') {
             return res.status(403).json({ success: false, message: "Founder clearance required" });
         }
@@ -313,13 +295,11 @@ exports.approveDiscount = async (req, res) => {
 
         const discountValue = student.discountRequest.amount;
 
-        // Apply financial change: Deduct from totalFee
         student.totalFee -= discountValue;
         student.discountRequest.status = 'APPROVED';
         
         await student.save();
 
-        // Log the final authorization
         await AuditLog.create({
             performedBy: "FOUNDER",
             action: `Discount Authorized: -₹${discountValue}`,
@@ -333,52 +313,6 @@ exports.approveDiscount = async (req, res) => {
     }
 };
 
-exports.approveStudent = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const student = await Student.findById(id);
-
-        if (!student) {
-            return res.status(404).json({ success: false, message: "Student not found" });
-        }
-
-        // 1. Mark as Verified
-        student.paymentStatus = 'VERIFIED';
-        student.isPortalActive = true;
-        student.isApproved = true;
-
-        // 2. SYNC THE LEDGER (The fix you asked for)
-        // If it was a FULL payment, amountPaid becomes totalFee.
-        // If it was PARTIAL, you might want to add only the first installment.
-        if (student.paymentOption === 'FULL') {
-            student.amountPaid = student.totalFee;
-        } else if (student.paymentOption === 'PARTIAL') {
-            // For partial, we assume the first EMI is paid now.
-            // Calculation: Total / Months (Match your React frontend logic)
-            const firstInstallment = Math.round(student.totalFee / (student.emiMonths || 1));
-            student.amountPaid = (student.amountPaid || 0) + firstInstallment;
-        }
-        // Note: For CASH, amountPaid stays 0 until you manually update it 
-        // OR you can set it to the total if you received full cash.
-
-        // 3. Update Enrollment status
-        if (student.enrollments && student.enrollments.length > 0) {
-            student.enrollments[student.enrollments.length - 1].status = 'Enrolled';
-        }
-
-        await student.save();
-
-        res.status(200).json({ 
-            success: true, 
-            message: `Payment verified. Amount Paid: ₹${student.amountPaid} updated.` 
-        });
-
-    } catch (error) {
-        console.error("APPROVE_STUDENT_ERROR:", error);
-        res.status(500).json({ success: false, message: "Internal Server Error" });
-    }
-};
-
 exports.authorizeStudentBatch = async (req, res) => {
     try {
         const studentId = req.params.id;
@@ -386,7 +320,6 @@ exports.authorizeStudentBatch = async (req, res) => {
 
         if (!batchId) return res.status(400).json({ success: false, message: "Batch ID missing" });
 
-        // Update student using $addToSet (prevents duplicates)
         const student = await Student.findByIdAndUpdate(
             studentId,
             { $addToSet: { activeBatches: batchId } },
@@ -407,8 +340,6 @@ exports.authorizeStudentBatch = async (req, res) => {
 
 exports.getWhatsAppLeads = async (req, res) => {
     try {
-        // Fetch all students who have a phone number (acting as WhatsApp leads)
-        // Sorting by newest first
         const leads = await Student.find({ phone: { $exists: true, $ne: null } })
             .select('name phone leadStatus isAiControlled updatedAt')
             .sort({ updatedAt: -1 })
@@ -425,7 +356,6 @@ exports.getWhatsAppChat = async (req, res) => {
     try {
         const { phone } = req.params;
         
-        // Fetch conversation history and sort chronologically (oldest to newest for UI)
         const chatHistory = await Message.find({ phoneNumber: phone })
             .sort({ timestamp: 1 });
             
@@ -458,17 +388,14 @@ exports.sendManualWhatsAppMessage = async (req, res) => {
             return res.status(400).json({ success: false, msg: "Phone and message are required" });
         }
 
-        // 1. Send via Meta API
         await sendWhatsAppMessage(phone, message);
 
-        // 2. Save to database as an 'agent' message
         const savedMessage = await Message.create({
             phoneNumber: phone,
             sender: 'agent',
             text: message
         });
 
-        // 3. Emit via Socket.io so other admin screens update instantly
         const io = req.app.get('io');
         if (io) {
             io.emit('new_whatsapp_message', { phone, text: message, sender: 'agent' });
@@ -485,7 +412,6 @@ exports.approvePayment = async (req, res) => {
     const { studentId } = req.params;
     const { transactionId } = req.body;
 
-    // This is the key: update the specific enrollment status
     await Student.updateOne(
         { _id: studentId, "enrollments.transactionId": transactionId },
         { $set: { "enrollments.$.paymentStatus": "VERIFIED" } }
@@ -498,16 +424,14 @@ exports.dispatchFounderReport = async (req, res) => {
     try {
         const { targetMonth, totalRevenue, topCourses, totalStudents, pendingQueue } = req.body;
 
-        // Note: Setup your environment variables for SMTP
         const transporter = nodemailer.createTransport({
-            service: 'gmail', // or your preferred SMTP
+            service: 'gmail', 
             auth: {
                 user: process.env.EMAIL_USER, 
                 pass: process.env.EMAIL_PASS
             }
         });
 
-        // Format the top courses list for the email
         const coursesHtml = topCourses.map((c, i) => 
             `<li><strong>${i + 1}. ${c.courseName}</strong> - Enrolls: ${c.enrollments} | Revenue: ₹${c.revenue.toLocaleString()}</li>`
         ).join('');
@@ -560,45 +484,242 @@ exports.dispatchFounderReport = async (req, res) => {
     }
 };
 
+// --- AGENTIC AI CONTROLLER (WITH BULLETPROOF DUPLICATE DEFENSE) ---
 exports.handleAdminChat = async (req, res) => {
     try {
-        const { message } = req.body;
+        const { message, context, chatHistory = [], file } = req.body;
+        if (!message && !file) return res.status(400).json({ success: false, error: "Message or file is required." });
 
-        if (!message) {
-            return res.status(400).json({ success: false, error: "Message is required." });
+        // SANITIZE USER INPUT: Convert Shift+Enter newlines to commas so the LLM parses it easily
+        const sanitizedMessage = message ? message.replace(/\n/g, ", ") : "";
+        console.log(`[Executive Agent] Analyzing command: "${sanitizedMessage || 'Processing attached document'}"`);
+
+        // --- PDF EXTRACTION ENGINE ---
+        let extractedPdfContent = "";
+        if (file && file.data) {
+            try {
+                const base64Data = file.data.replace(/^data:application\/pdf;base64,/, '');
+                const buffer = Buffer.from(base64Data, 'base64');
+                
+                const parsedPdf = await pdfParse(buffer);
+                extractedPdfContent = parsedPdf.text ? parsedPdf.text.replace(/\s+/g, ' ').trim().slice(0, 6000) : "";
+            } catch (pdfError) {
+                console.error("[Executive Agent] PDF Extraction Error:", pdfError.message);
+                extractedPdfContent = "[System Warning: Attached PDF could not be read or was scanned image-only]";
+            }
         }
 
-        console.log(`[Admin AI] Processing command: "${message}"`);
+        const systemPrompt = `
+You are the AI Executive Agent for Expert Computer Academy.
+YOUR OUTPUT MUST BE A SINGLE, VALID JSON OBJECT. NO OTHER TEXT ALLOWED.
 
-        const wantsDiagram = /(diagram|image|picture|visual|draw|graph|chart|architecture)/i.test(message);
+CRITICAL WORKFLOW RULES:
+1. DOCUMENT ANALYSIS: If an attached PDF document is provided below, analyze its content thoroughly.
+2. BULK DATA HANDLING: If the admin provides multiple parameters at once, extract ALL of them and map them.
+3. MISSING DATA: If ANY required field for an action is missing, output "action": "ASK_CLARIFICATION" and ask ONLY for the missing fields. 
+4. TOOL USAGE: If the user asks about real-world facts, public figures, news, or requests an IMAGE, you MUST output "action": "WEB_RESEARCH".
+5. JSON SAFETY: Do not use unescaped double quotes inside your string values.
 
-        // THE EXECUTIVE PROMPT: Notice how we prepend a strict persona to the admin's query
-        const adminPersonaQuery = `Act as an Executive Admin Assistant for an educational institute. The administrator is asking you to do this task: "${message}". Respond professionally and practically.`;
+AVAILABLE ACTIONS & REQUIREMENTS:
+- "CREATE_COUPON": Requires exactly 7 fields: 'couponCode', 'discountValue', 'discountType' ("PERCENTAGE" or "FIXED"), 'courseCode', 'maxUsage', 'expiryDate' (Must be in YYYY-MM-DD format), and 'description'.
+- "ACTIVATE_PORTAL": Requires 'studentName'.
+- "CREATE_BATCH": Requires 'batchCode' and 'courseName'.
+- "WEB_RESEARCH": Use for internet lookups or image requests.
+- "ASK_CLARIFICATION": Ask for missing parameters.
+- "GENERAL_REPLY": Answer questions about screen data.
 
-        const response = await axios.post('https://api.tavily.com/search', {
-            api_key: process.env.TAVILY_API_KEY,
-            query: adminPersonaQuery,
-            search_depth: "advanced", // Use advanced depth for better admin analysis
-            include_answer: true, 
-            include_images: wantsDiagram,
-            max_results: 3
-        });
+EXAMPLE WORKFLOW (Handling missing fields):
+User: "GENN, 20, Fixed, 2, 2026-07-31"
+AI Output:
+{
+    "action": "ASK_CLARIFICATION",
+    "parameters": {
+        "replyText": "I have captured the code (GENN), discount (20 Fixed), limit (2), and expiry (2026-07-31). Please provide the target course code and a description to complete the setup."
+    }
+}
 
-        let aiResponse = response.data.answer;
-        let aiImages = response.data.images || [];
+LIVE SCREEN DATA:
+- Pending Students: ${context?.pendingStudentsList || "None"}
+- Available Course Catalog: ${context?.availableCourses || "None"}
 
-        if (!aiResponse) {
-            aiResponse = "Co-Pilot Error: I am unable to compute that request with current database access.";
+${extractedPdfContent ? `ATTACHED PDF CONTENT ("${file.name}"):\n"""\n${extractedPdfContent}\n"""` : ""}
+
+OUTPUT FORMAT (JSON ONLY):
+{
+    "action": "...",
+    "parameters": {
+        "replyText": "...",
+        "couponCode": "...",
+        "discountValue": 0,
+        "discountType": "FIXED",
+        "courseCode": "...",
+        "maxUsage": 100,
+        "expiryDate": "2026-12-31",
+        "description": "...",
+        "studentName": "...",
+        "batchCode": "...",
+        "courseName": "..."
+    }
+}`;
+
+        const messages = [
+            { role: "system", content: systemPrompt },
+            ...chatHistory,
+            { role: "user", content: sanitizedMessage || `Please analyze the attached document: ${file?.name}` }
+        ];
+
+        console.log("[Executive Agent] Routing command through OpenRouter (Totally Free Auto-Fallback)...");
+
+        const aiResponse = await axios.post(
+            'https://openrouter.ai/api/v1/chat/completions', 
+            { 
+                model: "openrouter/free", 
+                messages: messages,
+                temperature: 0.1
+            },
+            { 
+                headers: { 
+                    "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                    "Content-Type": "application/json"
+                }
+            }
+        );
+
+        let aiText = aiResponse.data.choices?.[0]?.message?.content || "";
+        console.log("Raw AI Output before parsing:", aiText);
+
+        if (aiText.includes("User Safety: safe") || aiText.includes("Response Safety:")) {
+            console.warn("[Executive Agent] Intercepted corporate safety filter block.");
+            aiText = '{"action": "ASK_CLARIFICATION", "parameters": { "replyText": "My text-filters blocked the request. Could you rephrase your instruction?" }}';
+        }
+
+        let agentCommand;
+        try {
+            // IRONCLAD JSON PARSER
+            aiText = aiText.replace(/```json/gi, '').replace(/```/g, '').trim();
+            const jsonMatch = aiText.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) throw new Error("No JSON object found in response");
+            
+            let jsonString = jsonMatch[0].replace(/\n/g, " ").replace(/\r/g, "");
+            jsonString = jsonString.replace(/,\s*}/g, '}').replace(/,\s*\]/g, ']');
+            agentCommand = JSON.parse(jsonString);
+        } catch (parseError) {
+            console.warn("[Executive Agent] JSON parse failed:", parseError.message);
+            agentCommand = {
+                action: "ASK_CLARIFICATION",
+                parameters: {
+                    replyText: "I analyzed the input, but encountered a formatting glitch. Could you provide those details again?"
+                }
+            };
+        }
+
+        console.log("[Executive Agent] Routing Action:", agentCommand.action);
+
+        let finalReply = agentCommand.parameters?.replyText || "";
+        let aiImages = [];
+
+        // EXECUTION ENGINE
+        switch (agentCommand.action) {
+            case "CREATE_COUPON":
+                const targetCode = (agentCommand.parameters.couponCode || "UNKNOWN").toUpperCase().trim();
+                
+                // 1. BULLETPROOF PRE-CHECK FOR DUPLICATES (Case-Insensitive Regex)
+                const existingCoupon = await Coupon.findOne({ 
+                    code: { $regex: new RegExp('^' + targetCode + '$', 'i') } 
+                });
+                
+                if (existingCoupon) {
+                    finalReply = `⚠️ **Action Failed:** The coupon code **${existingCoupon.code}** already exists in the system. Please try again with a unique code.`;
+                    break;
+                }
+
+                // 2. SAFELY PARSE EXPIRY DATE
+                let parsedExpiry = new Date(new Date().setFullYear(new Date().getFullYear() + 1));
+                if (agentCommand.parameters.expiryDate) {
+                    const tempDate = new Date(agentCommand.parameters.expiryDate);
+                    if (!isNaN(tempDate)) parsedExpiry = tempDate;
+                }
+
+                // 3. CREATE COUPON
+                await Coupon.create({ 
+                    code: targetCode, 
+                    discountValue: agentCommand.parameters.discountValue || 0,
+                    discountType: agentCommand.parameters.discountType || "FIXED",
+                    courseCode: (agentCommand.parameters.courseCode || "ALL").toUpperCase(),
+                    maxUsage: agentCommand.parameters.maxUsage || 100,
+                    validFrom: new Date(),
+                    isActive: true,
+                    validTo: parsedExpiry, 
+                    description: agentCommand.parameters.description || `Special discount code generated by Executive AI.`
+                }); 
+                
+                let symbol = agentCommand.parameters.discountType === "PERCENTAGE" ? "%" : "₹";
+                let couponMsg = `✅ **System Action Completed:** Deployed coupon **${targetCode}** for ${symbol}${agentCommand.parameters.discountValue || 0}, valid until ${parsedExpiry.toISOString().split('T')[0]}.`;
+                finalReply = finalReply ? `${finalReply}\n\n${couponMsg}` : couponMsg;
+                break;
+
+            case "ACTIVATE_PORTAL":
+                await Student.findOneAndUpdate(
+                    { name: new RegExp(agentCommand.parameters.studentName || "", 'i') }, 
+                    { isApproved: true }
+                );
+                
+                let portalMsg = `✅ **System Action Completed:** Portal access granted for **${agentCommand.parameters.studentName || "the student"}**.`;
+                finalReply = finalReply ? `${finalReply}\n\n${portalMsg}` : portalMsg;
+                break;
+
+            case "CREATE_BATCH":
+                await Batch.create({
+                    batchCode: (agentCommand.parameters.batchCode || "TBD").toUpperCase(),
+                    courseName: agentCommand.parameters.courseName || "General Course",
+                    active: true,
+                    lastModifiedBy: "AI Executive Agent"
+                });
+                
+                await AuditLog.create({
+                    action: "Batch Created (AI Agent)",
+                    performedBy: "EXECUTIVE AI",
+                    targetName: agentCommand.parameters.batchCode || "TBD",
+                    details: `Course: ${agentCommand.parameters.courseName || "General Course"}`
+                });
+                
+                let batchMsg = `✅ **System Action Completed:** Initialized new batch **${agentCommand.parameters.batchCode || "TBD"}** for ${agentCommand.parameters.courseName || "the course"}.`;
+                finalReply = finalReply ? `${finalReply}\n\n${batchMsg}` : batchMsg;
+                break;
+
+            case "WEB_RESEARCH":
+                console.log("[Executive Agent] Handing off to Tavily for free web research...");
+                const wantsDiagram = /(diagram|image|picture|visual|draw|graph|chart|architecture)/i.test(sanitizedMessage);
+                
+                const tavilyResponse = await axios.post('https://api.tavily.com/search', {
+                    api_key: process.env.TAVILY_API_KEY,
+                    query: sanitizedMessage,
+                    search_depth: "advanced",
+                    include_answer: true,
+                    include_images: wantsDiagram,
+                    max_results: 3
+                });
+                
+                finalReply = tavilyResponse.data?.answer || "I completed the research, but no specific summary was returned.";
+                aiImages = tavilyResponse.data?.images || [];
+                break;
+
+            case "ASK_CLARIFICATION":
+            case "GENERAL_REPLY":
+                if (!finalReply) {
+                    finalReply = "I have processed your request.";
+                }
+                break;
         }
 
         return res.status(200).json({ 
             success: true, 
-            response: aiResponse,
-            images: aiImages.slice(0, 2)
+            response: finalReply,
+            images: aiImages.slice(0, 2) 
         });
 
     } catch (error) {
-        console.error("Admin Tavily Engine Error:", error.response?.data || error.message);
-        return res.status(500).json({ success: false, error: "The Co-Pilot engine is currently offline." });
+        console.error("Agentic Engine Error:", error.response?.data || error.message);
+        return res.status(500).json({ success: false, error: "The Co-Pilot encountered a processing error." });
     }
 };
