@@ -484,30 +484,46 @@ exports.dispatchFounderReport = async (req, res) => {
     }
 };
 
-// --- AGENTIC AI CONTROLLER (WITH BULLETPROOF DUPLICATE DEFENSE) ---
+// --- AGENTIC AI CONTROLLER (WITH RESCUE PARSER & SCHEMA FIXES) ---
 exports.handleAdminChat = async (req, res) => {
+    // 1. Instantly open a live data stream connection to the browser
+    res.writeHead(200, {
+        'Content-Type': 'application/x-ndjson',
+        'Transfer-Encoding': 'chunked',
+        'Connection': 'keep-alive'
+    });
+
+    // Helper function to push live status updates to the frontend
+    const sendLiveStatus = (message) => {
+        res.write(JSON.stringify({ streamType: 'status', message }) + '\n');
+    };
+
     try {
         const { message, context, chatHistory = [], file } = req.body;
-        if (!message && !file) return res.status(400).json({ success: false, error: "Message or file is required." });
+        if (!message && !file) {
+            res.write(JSON.stringify({ streamType: 'error', error: "Message or file is required." }) + '\n');
+            return res.end();
+        }
 
-        // SANITIZE USER INPUT: Convert Shift+Enter newlines to commas so the LLM parses it easily
         const sanitizedMessage = message ? message.replace(/\n/g, ", ") : "";
         console.log(`[Executive Agent] Analyzing command: "${sanitizedMessage || 'Processing attached document'}"`);
 
         // --- PDF EXTRACTION ENGINE ---
         let extractedPdfContent = "";
         if (file && file.data) {
+            sendLiveStatus("Analyzing attached PDF document...");
             try {
                 const base64Data = file.data.replace(/^data:application\/pdf;base64,/, '');
                 const buffer = Buffer.from(base64Data, 'base64');
-                
                 const parsedPdf = await pdfParse(buffer);
                 extractedPdfContent = parsedPdf.text ? parsedPdf.text.replace(/\s+/g, ' ').trim().slice(0, 6000) : "";
             } catch (pdfError) {
-                console.error("[Executive Agent] PDF Extraction Error:", pdfError.message);
-                extractedPdfContent = "[System Warning: Attached PDF could not be read or was scanned image-only]";
+                console.error("PDF Extraction Error:", pdfError.message);
+                extractedPdfContent = "[System Warning: Attached PDF could not be read]";
             }
         }
+
+        sendLiveStatus("Consulting Executive Co-Pilot...");
 
         const systemPrompt = `
 You are the AI Executive Agent for Expert Computer Academy.
@@ -523,26 +539,16 @@ CRITICAL WORKFLOW RULES:
 AVAILABLE ACTIONS & REQUIREMENTS:
 - "CREATE_COUPON": Requires exactly 7 fields: 'couponCode', 'discountValue', 'discountType' ("PERCENTAGE" or "FIXED"), 'courseCode', 'maxUsage', 'expiryDate' (Must be in YYYY-MM-DD format), and 'description'.
 - "ACTIVATE_PORTAL": Requires 'studentName'.
-- "CREATE_BATCH": Requires 'batchCode' and 'courseName'.
+- "CREATE_BATCH": Requires exactly 5 fields: 'batchCode', 'courseName', 'courseId', 'startTime', and 'endTime'.
 - "WEB_RESEARCH": Use for internet lookups or image requests.
 - "ASK_CLARIFICATION": Ask for missing parameters.
 - "GENERAL_REPLY": Answer questions about screen data.
-
-EXAMPLE WORKFLOW (Handling missing fields):
-User: "GENN, 20, Fixed, 2, 2026-07-31"
-AI Output:
-{
-    "action": "ASK_CLARIFICATION",
-    "parameters": {
-        "replyText": "I have captured the code (GENN), discount (20 Fixed), limit (2), and expiry (2026-07-31). Please provide the target course code and a description to complete the setup."
-    }
-}
 
 LIVE SCREEN DATA:
 - Pending Students: ${context?.pendingStudentsList || "None"}
 - Available Course Catalog: ${context?.availableCourses || "None"}
 
-${extractedPdfContent ? `ATTACHED PDF CONTENT ("${file.name}"):\n"""\n${extractedPdfContent}\n"""` : ""}
+${extractedPdfContent ? `ATTACHED PDF CONTENT:\n"""\n${extractedPdfContent}\n"""` : ""}
 
 OUTPUT FORMAT (JSON ONLY):
 {
@@ -558,7 +564,10 @@ OUTPUT FORMAT (JSON ONLY):
         "description": "...",
         "studentName": "...",
         "batchCode": "...",
-        "courseName": "..."
+        "courseName": "...",
+        "courseId": "...",
+        "startTime": "...",
+        "endTime": "..."
     }
 }`;
 
@@ -568,52 +577,46 @@ OUTPUT FORMAT (JSON ONLY):
             { role: "user", content: sanitizedMessage || `Please analyze the attached document: ${file?.name}` }
         ];
 
-        console.log("[Executive Agent] Routing command through OpenRouter (Totally Free Auto-Fallback)...");
-
         const aiResponse = await axios.post(
             'https://openrouter.ai/api/v1/chat/completions', 
             { 
-                model: "openrouter/free", 
+                model: "openrouter/free",
                 messages: messages,
                 temperature: 0.1
             },
-            { 
-                headers: { 
-                    "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-                    "Content-Type": "application/json"
-                }
-            }
+            { headers: { "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" } }
         );
 
         let aiText = aiResponse.data.choices?.[0]?.message?.content || "";
-        console.log("Raw AI Output before parsing:", aiText);
 
         if (aiText.includes("User Safety: safe") || aiText.includes("Response Safety:")) {
-            console.warn("[Executive Agent] Intercepted corporate safety filter block.");
             aiText = '{"action": "ASK_CLARIFICATION", "parameters": { "replyText": "My text-filters blocked the request. Could you rephrase your instruction?" }}';
         }
 
         let agentCommand;
         try {
-            // IRONCLAD JSON PARSER
-            aiText = aiText.replace(/```json/gi, '').replace(/```/g, '').trim();
-            const jsonMatch = aiText.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) throw new Error("No JSON object found in response");
+            // IRONCLAD RESCUE PARSER
+            let cleanText = aiText.replace(/```json/gi, '').replace(/```/g, '').trim();
+            const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
             
-            let jsonString = jsonMatch[0].replace(/\n/g, " ").replace(/\r/g, "");
-            jsonString = jsonString.replace(/,\s*}/g, '}').replace(/,\s*\]/g, ']');
-            agentCommand = JSON.parse(jsonString);
+            // If the LLM failed to output JSON and just output plain text, rescue it!
+            if (!jsonMatch) {
+                agentCommand = {
+                    action: "ASK_CLARIFICATION",
+                    parameters: { replyText: cleanText }
+                };
+            } else {
+                let jsonString = jsonMatch[0].replace(/\n/g, " ").replace(/\r/g, "");
+                jsonString = jsonString.replace(/,\s*}/g, '}').replace(/,\s*\]/g, ']');
+                agentCommand = JSON.parse(jsonString);
+            }
         } catch (parseError) {
-            console.warn("[Executive Agent] JSON parse failed:", parseError.message);
-            agentCommand = {
-                action: "ASK_CLARIFICATION",
-                parameters: {
-                    replyText: "I analyzed the input, but encountered a formatting glitch. Could you provide those details again?"
-                }
-            };
+            console.error("Rescue Parser Failed:", parseError.message);
+            agentCommand = { action: "ASK_CLARIFICATION", parameters: { replyText: "I encountered a formatting glitch. Could you provide those details again?" }};
         }
 
-        console.log("[Executive Agent] Routing Action:", agentCommand.action);
+        // --- PUSH LIVE ACTION STATUS ---
+        sendLiveStatus(`Executing Command: ${agentCommand.action.replace('_', ' ')}...`);
 
         let finalReply = agentCommand.parameters?.replyText || "";
         let aiImages = [];
@@ -622,82 +625,65 @@ OUTPUT FORMAT (JSON ONLY):
         switch (agentCommand.action) {
             case "CREATE_COUPON":
                 const targetCode = (agentCommand.parameters.couponCode || "UNKNOWN").toUpperCase().trim();
-                
-                // 1. BULLETPROOF PRE-CHECK FOR DUPLICATES (Case-Insensitive Regex)
-                const existingCoupon = await Coupon.findOne({ 
-                    code: { $regex: new RegExp('^' + targetCode + '$', 'i') } 
-                });
+                const existingCoupon = await Coupon.findOne({ code: { $regex: new RegExp('^' + targetCode + '$', 'i') } });
                 
                 if (existingCoupon) {
                     finalReply = `⚠️ **Action Failed:** The coupon code **${existingCoupon.code}** already exists in the system. Please try again with a unique code.`;
                     break;
                 }
 
-                // 2. SAFELY PARSE EXPIRY DATE
                 let parsedExpiry = new Date(new Date().setFullYear(new Date().getFullYear() + 1));
                 if (agentCommand.parameters.expiryDate) {
                     const tempDate = new Date(agentCommand.parameters.expiryDate);
                     if (!isNaN(tempDate)) parsedExpiry = tempDate;
                 }
 
-                // 3. CREATE COUPON
                 await Coupon.create({ 
                     code: targetCode, 
                     discountValue: agentCommand.parameters.discountValue || 0,
-                    discountType: agentCommand.parameters.discountType || "FIXED",
+                    discountType: agentCommand.parameters.discountType || "FIXED", 
                     courseCode: (agentCommand.parameters.courseCode || "ALL").toUpperCase(),
-                    maxUsage: agentCommand.parameters.maxUsage || 100,
+                    maxUsage: agentCommand.parameters.maxUsage || 100, 
                     validFrom: new Date(),
-                    isActive: true,
+                    isActive: true, 
                     validTo: parsedExpiry, 
                     description: agentCommand.parameters.description || `Special discount code generated by Executive AI.`
                 }); 
                 
                 let symbol = agentCommand.parameters.discountType === "PERCENTAGE" ? "%" : "₹";
-                let couponMsg = `✅ **System Action Completed:** Deployed coupon **${targetCode}** for ${symbol}${agentCommand.parameters.discountValue || 0}, valid until ${parsedExpiry.toISOString().split('T')[0]}.`;
-                finalReply = finalReply ? `${finalReply}\n\n${couponMsg}` : couponMsg;
+                finalReply = finalReply ? `${finalReply}\n\n✅ **System Action Completed:** Deployed coupon **${targetCode}** for ${symbol}${agentCommand.parameters.discountValue || 0}, valid until ${parsedExpiry.toISOString().split('T')[0]}.` 
+                                        : `✅ **System Action Completed:** Deployed coupon **${targetCode}** for ${symbol}${agentCommand.parameters.discountValue || 0}, valid until ${parsedExpiry.toISOString().split('T')[0]}.`;
                 break;
 
             case "ACTIVATE_PORTAL":
-                await Student.findOneAndUpdate(
-                    { name: new RegExp(agentCommand.parameters.studentName || "", 'i') }, 
-                    { isApproved: true }
-                );
-                
-                let portalMsg = `✅ **System Action Completed:** Portal access granted for **${agentCommand.parameters.studentName || "the student"}**.`;
-                finalReply = finalReply ? `${finalReply}\n\n${portalMsg}` : portalMsg;
+                await Student.findOneAndUpdate({ name: new RegExp(agentCommand.parameters.studentName || "", 'i') }, { isApproved: true });
+                finalReply = finalReply ? `${finalReply}\n\n✅ **System Action Completed:** Portal access granted for **${agentCommand.parameters.studentName || "the student"}**.` 
+                                        : `✅ **System Action Completed:** Portal access granted for **${agentCommand.parameters.studentName || "the student"}**.`;
                 break;
 
             case "CREATE_BATCH":
-                await Batch.create({
-                    batchCode: (agentCommand.parameters.batchCode || "TBD").toUpperCase(),
-                    courseName: agentCommand.parameters.courseName || "General Course",
-                    active: true,
-                    lastModifiedBy: "AI Executive Agent"
+                // FIXED: Providing all required fields for Mongoose validation
+                await Batch.create({ 
+                    batchCode: (agentCommand.parameters.batchCode || "TBD").toUpperCase(), 
+                    courseName: agentCommand.parameters.courseName || "General Course", 
+                    courseId: agentCommand.parameters.courseId || "UNKNOWN_ID",
+                    startTime: agentCommand.parameters.startTime || "09:00 AM",
+                    endTime: agentCommand.parameters.endTime || "06:00 PM",
+                    active: true, 
+                    lastModifiedBy: "AI Executive Agent" 
                 });
+                await AuditLog.create({ action: "Batch Created (AI Agent)", performedBy: "EXECUTIVE AI", targetName: agentCommand.parameters.batchCode || "TBD", details: `Course: ${agentCommand.parameters.courseName || "General Course"}` });
                 
-                await AuditLog.create({
-                    action: "Batch Created (AI Agent)",
-                    performedBy: "EXECUTIVE AI",
-                    targetName: agentCommand.parameters.batchCode || "TBD",
-                    details: `Course: ${agentCommand.parameters.courseName || "General Course"}`
-                });
-                
-                let batchMsg = `✅ **System Action Completed:** Initialized new batch **${agentCommand.parameters.batchCode || "TBD"}** for ${agentCommand.parameters.courseName || "the course"}.`;
-                finalReply = finalReply ? `${finalReply}\n\n${batchMsg}` : batchMsg;
+                finalReply = finalReply ? `${finalReply}\n\n✅ **System Action Completed:** Initialized new batch **${agentCommand.parameters.batchCode || "TBD"}** for ${agentCommand.parameters.courseName || "the course"}.`
+                                        : `✅ **System Action Completed:** Initialized new batch **${agentCommand.parameters.batchCode || "TBD"}** for ${agentCommand.parameters.courseName || "the course"}.`;
                 break;
 
             case "WEB_RESEARCH":
-                console.log("[Executive Agent] Handing off to Tavily for free web research...");
+                sendLiveStatus("Searching the global web & gathering intel..."); 
                 const wantsDiagram = /(diagram|image|picture|visual|draw|graph|chart|architecture)/i.test(sanitizedMessage);
                 
                 const tavilyResponse = await axios.post('https://api.tavily.com/search', {
-                    api_key: process.env.TAVILY_API_KEY,
-                    query: sanitizedMessage,
-                    search_depth: "advanced",
-                    include_answer: true,
-                    include_images: wantsDiagram,
-                    max_results: 3
+                    api_key: process.env.TAVILY_API_KEY, query: sanitizedMessage, search_depth: "advanced", include_answer: true, include_images: wantsDiagram, max_results: 3
                 });
                 
                 finalReply = tavilyResponse.data?.answer || "I completed the research, but no specific summary was returned.";
@@ -706,20 +692,23 @@ OUTPUT FORMAT (JSON ONLY):
 
             case "ASK_CLARIFICATION":
             case "GENERAL_REPLY":
-                if (!finalReply) {
-                    finalReply = "I have processed your request.";
-                }
+                if (!finalReply) finalReply = "I have processed your request.";
                 break;
         }
 
-        return res.status(200).json({ 
+        // 3. Send final data chunk and close the stream
+        res.write(JSON.stringify({ 
+            streamType: 'done', 
             success: true, 
-            response: finalReply,
+            response: finalReply, 
             images: aiImages.slice(0, 2) 
-        });
+        }) + '\n');
+        
+        return res.end();
 
     } catch (error) {
-        console.error("Agentic Engine Error:", error.response?.data || error.message);
-        return res.status(500).json({ success: false, error: "The Co-Pilot encountered a processing error." });
+        console.error("Agentic Engine Error:", error);
+        res.write(JSON.stringify({ streamType: 'error', error: "The Co-Pilot encountered a processing error." }) + '\n');
+        return res.end();
     }
 };
