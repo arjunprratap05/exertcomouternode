@@ -10,7 +10,6 @@ async function generateAIResponse(prompt) {
         const response = await axios.post(
             'https://openrouter.ai/api/v1/chat/completions',
             {model: "openrouter/free",
-                messages: messages,
                 messages: [
                     { role: "system", content: "You are the automated Social Media Manager for Expert Computer Academy. Keep responses concise, highly professional, encouraging, and free of emojis unless requested. Output raw text only, no markdown." },
                     { role: "user", content: prompt }
