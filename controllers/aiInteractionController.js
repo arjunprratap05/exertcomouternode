@@ -9,7 +9,8 @@ async function generateAIResponse(prompt) {
     try {
         const response = await axios.post(
             'https://openrouter.ai/api/v1/chat/completions',
-            {model: "openrouter/free",
+            {
+                model: "openrouter/free",
                 messages: [
                     { role: "system", content: "You are the automated Social Media Manager for Expert Computer Academy. Keep responses concise, highly professional, encouraging, and free of emojis unless requested. Output raw text only, no markdown." },
                     { role: "user", content: prompt }
@@ -20,7 +21,7 @@ async function generateAIResponse(prompt) {
         );
         return response.data.choices?.[0]?.message?.content || "";
     } catch (error) {
-        console.error("AI Generation Error:", error.message);
+        console.error("AI Generation Error:", error?.response?.data || error.message);
         return null;
     }
 }
@@ -48,7 +49,7 @@ exports.processMetaComment = async (payload) => {
 
         if (!publicReply || !privateDM) return;
 
-        const headers = { Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}` };
+        const headers = { Authorization: `Bearer ${process.env.FB_PAGE_ACCESS_TOKEN}` };
 
         // Platform-Specific Execution
         if (isInstagram) {
@@ -67,9 +68,14 @@ exports.processMetaComment = async (payload) => {
                 { message: publicReply }, { headers }
             );
 
-            // Private DM via FB Page
+            // Private DM via FB Page (Using senderId PSID)
             await axios.post(`https://graph.facebook.com/v19.0/me/messages`, 
-                { recipient: { comment_id: commentId }, message: { text: privateDM } }, { headers }
+                { 
+                    recipient: { id: senderId }, 
+                    messaging_type: "RESPONSE",
+                    message: { text: privateDM } 
+                }, 
+                { headers }
             );
         }
 

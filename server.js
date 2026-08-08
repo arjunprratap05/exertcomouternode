@@ -22,7 +22,6 @@ const app = express();
 const server = http.createServer(app);
 
 // --- 1. CORS CONFIGURATION (Fortified for Vercel) ---
-// It's safer to explicitly list your live domains alongside the env variable
 const allowedOrigins = [
     process.env.FRONTEND_URL,
 ].filter(Boolean); // Removes any undefined values
@@ -59,20 +58,24 @@ const otpLimiter = rateLimit({
 });
 
 // --- 4. ROBUST DATABASE CONNECTION ---
+// Cached connection logic for serverless to prevent multiple connections on every webhook/request
+let isConnected = false;
 const connectDB = async () => {
+    if (isConnected) return;
     try {
         await mongoose.connect(process.env.MONGO_URI, {
             serverSelectionTimeoutMS: 5000,
         });
+        isConnected = true;
         console.log("✅ Expert Academy Database Connected");
     } catch (err) {
         console.error("❌ MongoDB Connection Error:", err.message);
-        setTimeout(connectDB, 5000); 
     }
 };
+
+// Connect immediately on boot/invocation
 connectDB();
 
-require('./controllers/cronJobs');
 // --- 5. ROUTES ---
 app.use('/api/auth', otpLimiter, require('./routes/authRoutes')); 
 app.use('/api/registration', require('./routes/registrationRoutes')); 
@@ -99,6 +102,11 @@ app.use((err, req, res, next) => {
     });
 });
 
-const PORT = process.env.PORT || 5000;
+// --- 7. VERCEL SERVERLESS EXPORT vs LOCAL LISTEN ---
+if (process.env.NODE_ENV !== 'production') {
+    const PORT = process.env.PORT || 5000;
+    server.listen(PORT, () => console.log(`🚀 Expert Academy API running locally on port ${PORT}`));
+}
 
-server.listen(PORT, () => console.log(`🚀 Expert Academy API running on port ${PORT}`));
+// Export the Express app / HTTP server for Vercel's serverless functions
+module.exports = server;

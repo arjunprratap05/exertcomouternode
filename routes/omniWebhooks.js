@@ -1,3 +1,4 @@
+// routes/webhookRoutes.js
 const express = require('express');
 const router = express.Router();
 const { processMetaComment, processGoogleReview, processJustdialLead } = require('../controllers/aiInteractionController');
@@ -7,29 +8,22 @@ router.post('/social-inbound', async (req, res) => {
         const body = req.body;
         console.log("Incoming Webhook Payload:", JSON.stringify(body, null, 2));
 
-        if (body.object === 'page') {
+        if (body.object === 'page' || body.object === 'instagram') {
             for (const entry of body.entry) {
+                // Check for standard Page/Instagram Comments & Feed Changes
                 if (entry.changes) {
                     for (const change of entry.changes) {
-                        // This triggers on ANY comment added to a post
                         if (change.field === 'feed' && change.value.item === 'comment' && change.value.verb === 'add') {
-                            const commentText = change.value.message;
-                            const commentId = change.value.comment_id;
-                            const senderId = change.value.from.id;
-                            const senderName = change.value.from.name;
-
-                            // Prevent infinite loops if the Page itself comments
-                            if (senderId === process.env.FB_PAGE_ID) continue;
-
-                            console.log(`Captured live comment from ${senderName}: "${commentText}"`);
-
-                            // Send this directly to your AI function to reply & DM
-                            await processAiCommentAndDm({
-                                commentId,
-                                senderId,
-                                commentText,
-                                senderName
-                            });
+                            await processMetaComment(body);
+                        }
+                    }
+                }
+                // Check for direct Messenger / Instagram messages if subscribed
+                if (entry.messaging) {
+                    for (const messagingEvent of entry.messaging) {
+                        if (messagingEvent.message && !messagingEvent.message.is_echo) {
+                            // Map direct messages into a compatible format for your handler if needed
+                            await processMetaComment(body);
                         }
                     }
                 }
