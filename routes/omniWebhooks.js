@@ -10,19 +10,19 @@ router.post('/social-inbound', async (req, res) => {
 
         if (body.object === 'page' || body.object === 'instagram') {
             for (const entry of body.entry) {
-                // Check for standard Page/Instagram Comments & Feed Changes
+                // Handle feed events (comments, posts)
                 if (entry.changes) {
                     for (const change of entry.changes) {
-                        if (change.field === 'feed' && change.value.item === 'comment' && change.value.verb === 'add') {
+                        // Pass any comment-related or feed activity directly to controller
+                        if (change.field === 'feed') {
                             await processMetaComment(body);
                         }
                     }
                 }
-                // Check for direct Messenger / Instagram messages if subscribed
+                // Handle direct inbox messages
                 if (entry.messaging) {
                     for (const messagingEvent of entry.messaging) {
                         if (messagingEvent.message && !messagingEvent.message.is_echo) {
-                            // Map direct messages into a compatible format for your handler if needed
                             await processMetaComment(body);
                         }
                     }
