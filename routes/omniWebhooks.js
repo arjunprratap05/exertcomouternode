@@ -10,10 +10,10 @@ router.post('/social-inbound', async (req, res) => {
 
         if (body.object === 'page' || body.object === 'instagram') {
             for (const entry of body.entry) {
-                // Handle feed events (comments, posts)
+                
                 if (entry.changes) {
                     for (const change of entry.changes) {
-                        // Pass any comment-related or feed activity directly to controller
+                        
                         if (change.field === 'feed') {
                             await processMetaComment(body);
                         }

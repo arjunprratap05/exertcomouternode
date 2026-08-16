@@ -4,8 +4,6 @@ const mongoose = require('mongoose');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const dns = require('node:dns');
-const http = require('http'); 
-const { Server } = require('socket.io'); 
 const cronController = require('./controllers/cronJobs');
 const omniWebhooks = require('./routes/omniWebhooks');
 
@@ -18,9 +16,6 @@ dns.setServers(['1.1.1.1', '8.8.8.8']);
 
 const app = express();
 
-// --- WRAP EXPRESS IN HTTP SERVER ---
-const server = http.createServer(app);
-
 // --- 1. CORS CONFIGURATION (Fortified for Vercel) ---
 const allowedOrigins = [
     process.env.FRONTEND_URL,
@@ -32,14 +27,6 @@ const corsOptions = {
     credentials: true,
 };
 app.use(cors(corsOptions));
-
-// --- CONFIGURE SOCKET.IO ---
-const io = new Server(server, {
-    cors: corsOptions // Reuse the same robust CORS options
-});
-
-// Make 'io' globally accessible so controllers can emit events
-app.set('io', io);
 
 // --- 2. SECURITY & UTILITY MIDDLEWARE ---
 app.use(helmet()); 
@@ -57,8 +44,7 @@ const otpLimiter = rateLimit({
     }
 });
 
-// --- 4. ROBUST DATABASE CONNECTION ---
-// Cached connection logic for serverless to prevent multiple connections on every webhook/request
+// --- 4. ROBUST DATABASE CONNECTION (Serverless Cached) ---
 let isConnected = false;
 const connectDB = async () => {
     if (isConnected) return;
@@ -105,8 +91,9 @@ app.use((err, req, res, next) => {
 // --- 7. VERCEL SERVERLESS EXPORT vs LOCAL LISTEN ---
 if (process.env.NODE_ENV !== 'production') {
     const PORT = process.env.PORT || 5000;
-    server.listen(PORT, () => console.log(`🚀 Expert Academy API running locally on port ${PORT}`));
+    // Note: We use app.listen directly now instead of server.listen
+    app.listen(PORT, () => console.log(`🚀 Expert Academy API running locally on port ${PORT}`));
 }
 
-// Export the Express app / HTTP server for Vercel's serverless functions
-module.exports = server;
+// Export the pure Express app for Vercel's serverless functions
+module.exports = app;

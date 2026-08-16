@@ -1,7 +1,17 @@
 const axios = require('axios');
-const Student = require('../models/student'); // Ensure capitalization matches your file
+const Student = require('../models/student');
 const Message = require('../models/Message');
 const { processAiResponse } = require('../services/aiService');
+const Pusher = require('pusher');
+
+// Initialize Pusher (You will get these keys from your free Pusher.com dashboard)
+const pusher = new Pusher({
+    appId: process.env.PUSHER_APP_ID,
+    key: process.env.PUSHER_KEY,
+    secret: process.env.PUSHER_SECRET,
+    cluster: process.env.PUSHER_CLUSTER,
+    useTLS: true
+});
 
 exports.verifyWebhook = (req, res) => {
     if (req.query['hub.mode'] && req.query['hub.verify_token'] === process.env.META_VERIFY_TOKEN) {
@@ -11,14 +21,14 @@ exports.verifyWebhook = (req, res) => {
 };
 
 exports.handleIncomingMessage = async (req, res) => {
-    res.sendStatus(200); // Acknowledge Meta immediately
+    res.sendStatus(200); // Acknowledge Meta immediately to prevent retry loops
 
     const value = req.body.entry?.[0]?.changes?.[0]?.value;
     if (!value?.messages) return;
 
     let rawPhone = value.messages[0].from; 
     
-    // Normalize Indian Phone Numbers (Strip '91' if exactly 12 digits)
+    // Normalize Indian Phone Numbers
     let studentPhone = rawPhone;
     if (rawPhone.startsWith('91') && rawPhone.length === 12) {
         studentPhone = rawPhone.substring(2); 
@@ -27,11 +37,10 @@ exports.handleIncomingMessage = async (req, res) => {
     const messageText = value.messages[0].text?.body;
     if (!messageText) return;
 
-    // 1. Find the student 
+    // 1. Find or Create the student 
     let student = await Student.findOne({ phone: studentPhone });
     
     if (!student) {
-        // SCENARIO A: Brand new student. Create them and tag them.
         student = await Student.create({ 
             name: "New WhatsApp Lead",
             phone: studentPhone, 
@@ -41,28 +50,27 @@ exports.handleIncomingMessage = async (req, res) => {
             leadStatus: 'Cold Lead',
             leadSource: 'WhatsApp'
         });
-    } else {
-        // SCENARIO B: Existing student. 
-        // Force them to appear in the dashboard by updating their leadSource.
-        if (student.leadSource !== 'WhatsApp') {
-            await Student.updateOne(
-                { _id: student._id }, 
-                { leadSource: 'WhatsApp' }
-            );
-        }
+    } else if (student.leadSource !== 'WhatsApp') {
+        await Student.updateOne(
+            { _id: student._id }, 
+            { leadSource: 'WhatsApp' }
+        );
     }
 
-    // 2. Save message to history (FIXED: Added explicit timestamp field)
-    await Message.create({ 
+    // 2. Save message to history
+    const newMessage = await Message.create({ 
         phoneNumber: studentPhone,
         sender: 'student', 
         text: messageText,
         timestamp: new Date()
     });
 
-    // 3. Intelligent Routing
+    // 3. PUSHER REAL-TIME EMIT (Pushes to the React Dashboard instantly)
+    pusher.trigger("eca-chat-channel", "live_whatsapp_message", newMessage);
+
+    // 4. Intelligent Routing
     const currentHour = new Date().getHours();
-    const isBusinessHours = currentHour >= 9 && currentHour < 18; // 9 AM to 6 PM
+    const isBusinessHours = currentHour >= 9 && currentHour < 18; 
 
     if (isBusinessHours) {
         console.log(`Human intervention required for: ${studentPhone}`);
@@ -105,7 +113,7 @@ exports.sendManualMessage = async (req, res) => {
             }
         );
 
-        // 2. Save the admin's message to the database (FIXED: sender updated to 'agent' & explicit timestamp added)
+        // 2. Save the admin's message to the database
         const newMessage = await Message.create({ 
             phoneNumber: phone, 
             sender: 'agent', 
@@ -113,6 +121,9 @@ exports.sendManualMessage = async (req, res) => {
             agentNumber: process.env.AGENT_1_PHONE,
             timestamp: new Date()
         });
+
+        // 3. PUSHER REAL-TIME EMIT (Syncs all admin screens instantly)
+        pusher.trigger("eca-chat-channel", "live_whatsapp_message", newMessage);
 
         res.json({ success: true, message: newMessage });
     } catch (err) {

@@ -13,8 +13,10 @@ const { authMiddleware, authorize } = require('../middleware/authMiddleware');
 
 
 // --- WEBHOOK ROUTES (For Meta) ---
-router.get('/', verifyWebhook);
-router.post('/', handleIncomingMessage);
+// CHANGED: Added '/webhook' so it matches what you typed in the Meta Dashboard
+router.get('/webhook', verifyWebhook);
+router.post('/webhook', handleIncomingMessage);
+
 
 // --- DASHBOARD API ROUTES (For React) ---
 router.get('/leads', authMiddleware, authorize('founder', 'admin', 'frontoffice'), async (req, res) => {
