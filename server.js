@@ -47,17 +47,37 @@ const otpLimiter = rateLimit({
 // --- 4. ROBUST DATABASE CONNECTION (Serverless Cached) ---
 let isConnected = false;
 const connectDB = async () => {
-    if (isConnected) return;
+    // If already connected, skip
+    if (isConnected || mongoose.connection.readyState === 1) {
+        isConnected = true;
+        return;
+    }
+    
     try {
         await mongoose.connect(process.env.MONGO_URI, {
             serverSelectionTimeoutMS: 5000,
+            maxPoolSize: 10, // Optimized for serverless
         });
         isConnected = true;
         console.log("✅ Expert Academy Database Connected");
     } catch (err) {
         console.error("❌ MongoDB Connection Error:", err.message);
+        throw err; // Force the middleware to catch this
     }
 };
+
+// 🚨 CRITICAL VERCEL FIX: Force DB connection BEFORE handling any routes
+app.use(async (req, res, next) => {
+    try {
+        await connectDB();
+        next();
+    } catch (error) {
+        return res.status(500).json({ 
+            success: false, 
+            msg: "Database connection failed or timed out." 
+        });
+    }
+});
 
 // Connect immediately on boot/invocation
 connectDB();
