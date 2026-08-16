@@ -96,8 +96,9 @@ exports.sendManualMessage = async (req, res) => {
         const { phone, text } = req.body; 
         
         // 1. Connect to Meta API to send the message
+        // ⚠️ UPDATED: Using META_PAGE_ID and FB_PAGE_ACCESS_TOKEN to match your Vercel setup
         await axios.post(
-            `https://graph.facebook.com/v18.0/${process.env.META_PHONE_ID}/messages`,
+            `https://graph.facebook.com/v18.0/${process.env.META_PAGE_ID}/messages`,
             {
                 messaging_product: "whatsapp",
                 recipient_type: "individual",
@@ -107,7 +108,7 @@ exports.sendManualMessage = async (req, res) => {
             },
             {
                 headers: {
-                    'Authorization': `Bearer ${process.env.META_ACCESS_TOKEN}`,
+                    'Authorization': `Bearer ${process.env.FB_PAGE_ACCESS_TOKEN}`,
                     'Content-Type': 'application/json'
                 }
             }
@@ -122,16 +123,23 @@ exports.sendManualMessage = async (req, res) => {
             timestamp: new Date()
         });
 
-        // 3. PUSHER REAL-TIME EMIT
-        pusher.trigger("eca-chat-channel", "live_whatsapp_message", newMessage);
+        // Fetch the student so the Pusher payload perfectly matches the incoming message format
+        const student = await Student.findOne({ phone: phone });
+
+        // 3. PUSHER REAL-TIME EMIT (Syncs all admin screens instantly)
+        pusher.trigger("eca-chat-channel", "live_whatsapp_message", {
+            message: newMessage,
+            student: student || { phone: phone }
+        });
 
         res.json({ success: true, message: newMessage });
+        
     } catch (err) {
-        // 🔥 THIS WILL CAPTURE THE EXACT META OR PUSHER ERROR
+        // 🔥 CAPTURES THE EXACT META ERROR FOR EASY DEBUGGING
         const exactError = err.response?.data || err.message;
         console.error("WhatsApp Send Error:", exactError);
         
-        // Send the real error back to your frontend network tab
+        // Sends the real error back to your frontend network tab
         res.status(500).json({ 
             success: false, 
             message: "Failed to send message.",
