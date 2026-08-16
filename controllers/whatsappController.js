@@ -118,19 +118,24 @@ exports.sendManualMessage = async (req, res) => {
             phoneNumber: phone, 
             sender: 'agent', 
             text: text,
-            agentNumber: process.env.AGENT_1_PHONE,
+            agentNumber: process.env.AGENT_1_PHONE || "Admin",
             timestamp: new Date()
         });
 
-        // 3. PUSHER REAL-TIME EMIT (Syncs all admin screens instantly)
+        // 3. PUSHER REAL-TIME EMIT
         pusher.trigger("eca-chat-channel", "live_whatsapp_message", newMessage);
 
         res.json({ success: true, message: newMessage });
     } catch (err) {
-        console.error("Meta API Connection Error:", err.response?.data || err.message);
+        // 🔥 THIS WILL CAPTURE THE EXACT META OR PUSHER ERROR
+        const exactError = err.response?.data || err.message;
+        console.error("WhatsApp Send Error:", exactError);
+        
+        // Send the real error back to your frontend network tab
         res.status(500).json({ 
             success: false, 
-            message: "Failed to connect to Meta API." 
+            message: "Failed to send message.",
+            metaDetails: exactError 
         });
     }
 };
