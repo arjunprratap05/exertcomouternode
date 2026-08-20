@@ -4,7 +4,7 @@ const Message = require('../models/Message');
 const { processAiResponse } = require('../services/aiService');
 const Pusher = require('pusher');
 
-// Initialize Pusher (You will get these keys from your free Pusher.com dashboard)
+// Initialize Pusher
 const pusher = new Pusher({
     appId: process.env.PUSHER_APP_ID,
     key: process.env.PUSHER_KEY,
@@ -79,6 +79,43 @@ exports.handleIncomingMessage = async (req, res) => {
     }
 };
 
+// --- DIRECT WHATSAPP CHATS (Excludes Website Inquiries/Registrations) ---
+exports.getDirectWhatsAppChats = async (req, res) => {
+    try {
+        // Aggregate unique phone numbers from the Message collection directly
+        const activeThreads = await Message.aggregate([
+            { $sort: { timestamp: -1 } },
+            {
+                $group: {
+                    _id: "$phoneNumber",
+                    lastMessage: { $first: "$text" },
+                    lastTimestamp: { $first: "$timestamp" },
+                    lastSender: { $first: "$sender" }
+                }
+            },
+            { $sort: { lastTimestamp: -1 } }
+        ]);
+
+        // Enrich threads with student profiles if they exist
+        const enrichedThreads = await Promise.all(activeThreads.map(async (thread) => {
+            const student = await Student.findOne({ phone: thread._id });
+            return {
+                phone: thread._id,
+                name: student ? student.name : `WhatsApp Lead (${thread._id})`,
+                leadStatus: student ? student.leadStatus : 'Cold Lead',
+                isAiControlled: student ? student.isAiControlled : true,
+                lastMessage: thread.lastMessage,
+                lastTimestamp: thread.lastTimestamp
+            };
+        }));
+
+        res.json({ success: true, chats: enrichedThreads });
+    } catch (err) {
+        console.error("Error fetching direct WhatsApp chats:", err);
+        res.status(500).json({ success: false, message: "Failed to fetch WhatsApp chats" });
+    }
+};
+
 // --- ADMIN DASHBOARD FUNCTIONS ---
 
 exports.getMessages = async (req, res) => {
@@ -96,7 +133,6 @@ exports.sendManualMessage = async (req, res) => {
         const { phone, text } = req.body; 
         
         // 1. Connect to Meta API to send the message
-        // ⚠️ UPDATED: Using META_PAGE_ID and FB_PAGE_ACCESS_TOKEN to match your Vercel setup
         await axios.post(
             `https://graph.facebook.com/v18.0/${process.env.META_PAGE_ID}/messages`,
             {
@@ -123,10 +159,9 @@ exports.sendManualMessage = async (req, res) => {
             timestamp: new Date()
         });
 
-        // Fetch the student so the Pusher payload perfectly matches the incoming message format
         const student = await Student.findOne({ phone: phone });
 
-        // 3. PUSHER REAL-TIME EMIT (Syncs all admin screens instantly)
+        // 3. PUSHER REAL-TIME EMIT
         pusher.trigger("eca-chat-channel", "live_whatsapp_message", {
             message: newMessage,
             student: student || { phone: phone }
@@ -135,11 +170,9 @@ exports.sendManualMessage = async (req, res) => {
         res.json({ success: true, message: newMessage });
         
     } catch (err) {
-        // 🔥 CAPTURES THE EXACT META ERROR FOR EASY DEBUGGING
         const exactError = err.response?.data || err.message;
         console.error("WhatsApp Send Error:", exactError);
         
-        // Sends the real error back to your frontend network tab
         res.status(500).json({ 
             success: false, 
             message: "Failed to send message.",

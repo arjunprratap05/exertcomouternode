@@ -5,7 +5,41 @@ const Student = require('../models/student');
 const { sendWhatsAppMessage } = require('./whatsappService');
 const courseData = require('../data/course'); 
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// 1. Initialize OpenAI SDK pointing to OpenRouter's edge gateway
+const openai = new OpenAI({ 
+    baseURL: 'https://openrouter.ai/api/v1',
+    apiKey: process.env.OPENROUTER_API_KEY,
+    defaultHeaders: {
+        'HTTP-Referer': 'https://exertcomouternode.vercel.app', 
+        'X-Title': 'ECA Live Agent'
+    }
+});
+
+// Helper function for Deep ML sentiment and intent analysis
+async function analyzeStudentDeepML(messageText, history) {
+    try {
+        const response = await openai.chat.completions.create({
+            model: 'openrouter/free', 
+            response_format: { type: "json_object" },
+            messages: [
+                {
+                    role: "system",
+                    content: `You are a Deep ML classification engine. Analyze the student's message and history. Return a JSON object with:
+                    - "sentiment": "positive", "neutral", or "negative"
+                    - "intent": "course_inquiry", "fee_negotiation", "technical_issue", or "general"
+                    - "conversionProbability": a number from 0 to 100 representing likelihood to enroll`
+                },
+                ...history,
+                { role: "user", content: messageText }
+            ]
+        });
+
+        return JSON.parse(response.choices[0].message.content);
+    } catch (err) {
+        console.error("Deep ML Analysis Error:", err);
+        return { sentiment: "neutral", intent: "general", conversionProbability: 50 };
+    }
+}
 
 exports.processAiResponse = async (studentPhone, messageText) => {
     try {
@@ -15,6 +49,20 @@ exports.processAiResponse = async (studentPhone, messageText) => {
             role: msg.sender === 'student' ? 'user' : 'assistant',
             content: msg.text
         }));
+
+        // 1. Run Deep ML analysis on incoming message & history
+        const mlInsights = await analyzeStudentDeepML(messageText, formattedHistory);
+
+        // Update student profile with latest ML scoring in MongoDB
+        await Student.updateOne(
+            { phone: studentPhone },
+            { 
+                $set: { 
+                    sentiment: mlInsights.sentiment, 
+                    conversionProbability: mlInsights.conversionProbability 
+                } 
+            }
+        );
 
         // Format Tech Courses for AI
         const techString = courseData.techCoursesData.map(c => 
@@ -44,8 +92,9 @@ exports.processAiResponse = async (studentPhone, messageText) => {
         
         Keep answers short, friendly, and formatted nicely for WhatsApp.`;
 
+        // 2. Call OpenRouter for the main agent response
         const completion = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: 'openai/gpt-4o', 
             messages: [{ role: 'system', content: systemPrompt }, ...formattedHistory]
         });
 
