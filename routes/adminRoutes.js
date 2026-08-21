@@ -4,7 +4,13 @@ const adminController = require('../controllers/adminController');
 const couponController = require('../controllers/couponController');
 const { authMiddleware, authorize } = require('../middleware/authMiddleware');
 const { getWhatsAppLeads,getWhatsAppChat,toggleAiControl,sendManualWhatsAppMessage} = require('../controllers/adminController');
+const { globalSearch } = require('../controllers/globalSearchController');
+const { tracePersonWithRelatives } = require('../controllers/traceController');
+const { getDirectWhatsAppChats } = require('../controllers/whatsappController');
 
+router.get('/global-search', globalSearch);
+router.get('/trace/:phone', tracePersonWithRelatives);
+router.get('/whatsapp/direct-chats', getDirectWhatsAppChats);
 
 router.post('/login', adminController.adminLogin);
 

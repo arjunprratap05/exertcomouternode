@@ -1,3 +1,4 @@
+// controllers/whatsappController.js
 const axios = require('axios');
 const Student = require('../models/student');
 const Message = require('../models/Message');
@@ -55,6 +56,17 @@ exports.handleIncomingMessage = async (req, res) => {
             { _id: student._id }, 
             { leadSource: 'WhatsApp' }
         );
+    }
+
+    // --- PROGRESSIVE PROFILING (Organic Name Capture) ---
+    // If the student's name is still the default temporary label, check if they are introducing themselves
+    if (student.name === "New WhatsApp Lead" || student.name.startsWith("WhatsApp Lead")) {
+        const nameMatch = messageText.match(/(?:my name is|i am|this is|i'm|myself)\s+([a-zA-Z\s]{2,30})/i);
+        if (nameMatch && nameMatch[1]) {
+            const extractedName = nameMatch[1].trim();
+            student.name = extractedName;
+            await student.save();
+        }
     }
 
     // 2. Save message to history
