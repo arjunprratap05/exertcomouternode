@@ -16,6 +16,10 @@ dns.setServers(['1.1.1.1', '8.8.8.8']);
 
 const app = express();
 
+// --- CRITICAL VERCEL PROXY FIX ---
+// Tells Express to trust reverse proxy headers (X-Forwarded-For) from Vercel
+app.set('trust proxy', 1);
+
 // --- 1. CORS CONFIGURATION (Fortified for Vercel) ---
 const allowedOrigins = [
     process.env.FRONTEND_URL,
@@ -66,7 +70,7 @@ const connectDB = async () => {
     }
 };
 
-// 🚨 CRITICAL VERCEL FIX: Force DB connection BEFORE handling any routes
+// CRITICAL VERCEL FIX: Force DB connection BEFORE handling any routes
 app.use(async (req, res, next) => {
     try {
         await connectDB();
@@ -111,7 +115,6 @@ app.use((err, req, res, next) => {
 // --- 7. VERCEL SERVERLESS EXPORT vs LOCAL LISTEN ---
 if (process.env.NODE_ENV !== 'production') {
     const PORT = process.env.PORT || 5000;
-    // Note: We use app.listen directly now instead of server.listen
     app.listen(PORT, () => console.log(`🚀 Expert Academy API running locally on port ${PORT}`));
 }
 
