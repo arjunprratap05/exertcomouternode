@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const certificateController = require('../controllers/CertificateController');
+const certificateController = require('../controllers/certificateController');
 const { authMiddleware, authorize } = require('../middleware/authMiddleware');
 
 const upload = multer({
