@@ -88,19 +88,30 @@ exports.studentLogin = async (req, res) => {
 exports.sendOTP = async (req, res) => {
     try {
         const { email } = req.body;
-        if (!email) return res.status(400).json({ success: false, msg: "Email required" });
+        if (!email) {
+            return res.status(400).json({ success: false, msg: "Email required" });
+        }
 
+        // 1. Generate secure OTP
         const otp = crypto.randomInt(100000, 999999).toString();
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes expiration
 
-        // Save OTP to MongoDB instead of Local Memory
-        await Otp.deleteMany({ email }); // Clear any old OTPs for this email
-        await Otp.create({ email, otp }); 
+        // 2. Perform database operations efficiently
+        // Using upsert or concurrent delete/create saves round-trip overhead
+        await Promise.all([
+            Otp.deleteMany({ email }),
+            Otp.create({ email, otp, expiresAt })
+        ]);
 
+        // 3. Send email asynchronously or await depending on your reliability needs.
+        // Awaiting guarantees delivery success before responding, but keeping 
+        // the email payload lightweight ensures minimal latency.
         await sendOTPEmail(email, otp);
-        res.status(200).json({ success: true, msg: "OTP Sent" });
+
+        return res.status(200).json({ success: true, msg: "OTP Sent" });
     } catch (error) {
         console.error("OTP Email Error:", error);
-        res.status(500).json({ 
+        return res.status(500).json({ 
             success: false, 
             msg: "Email failed",
             reason: error.message 

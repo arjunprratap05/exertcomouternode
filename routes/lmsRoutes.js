@@ -33,5 +33,6 @@ router.get('/download/:id',
 
 router.post('/sync-multi', authMiddleware, (req, res, next) => lmsController.syncMultiBatchLMS(req, res, next));
 router.get('/add-lecture', authMiddleware, (req, res, next) => lmsController.getAllLectures(req, res, next));
+router.get('/student/materials', authMiddleware, lmsController.getAllMaterials);
 
 module.exports = router;

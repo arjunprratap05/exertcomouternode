@@ -97,6 +97,7 @@ app.use('/api', require('./routes/quizRoutes'));
 app.use('/api/whatsapp', require('./routes/whatsappRoutes'));
 app.get('/api/cron/monthly-report', cronController.triggerMonthlyReport);
 app.use('/webhooks', omniWebhooks);
+app.use('/api', require('./routes/certificateRoutes'));
 
 // Health Check
 app.get('/', (req, res) => {

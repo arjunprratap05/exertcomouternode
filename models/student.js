@@ -28,7 +28,25 @@ const studentSchema = new mongoose.Schema({
             enum: ['PENDING', 'PARTIALLY_PAID', 'PAID', 'VERIFIED', 'REJECTED'], 
             default: 'PENDING' 
         },
-        emiMonths: { type: Number, default: 1 }
+        emiMonths: { type: Number, default: 1 },
+        
+        // --- COURSE-LEVEL COMPLETION & CERTIFICATE DATA ---
+        curriculumProgress: { type: Number, default: 0 }, // 0 to 100%
+        examPassed: { type: Boolean, default: false },
+        examScore: { type: Number, default: 0 },
+        certificateRequest: {
+            status: { 
+                type: String, 
+                enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED'], 
+                default: 'NONE' 
+            },
+            requestedAt: { type: Date },
+            reviewedAt: { type: Date },
+            reviewedBy: { type: String },
+            certificateFile: { type: Buffer },
+            certificateMimeType: { type: String },
+            remarks: { type: String }
+        }
     }],
 
     // --- PREVIOUS WORKING STYLE (LEGACY FLAT ROOT FIELDS) ---
@@ -38,6 +56,25 @@ const studentSchema = new mongoose.Schema({
     paymentOption: { type: String },
     transactionId: { type: String },
     isApproved: { type: Boolean, default: false },
+
+    // Legacy Fallback Completion & Certificate Fields
+    courseCompleted: { type: Boolean, default: false },
+    curriculumProgress: { type: Number, default: 0 },
+    examPassed: { type: Boolean, default: false },
+    examScore: { type: Number, default: 0 },
+    certificateRequest: {
+        status: { 
+            type: String, 
+            enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED'], 
+            default: 'NONE' 
+        },
+        requestedAt: { type: Date },
+        reviewedAt: { type: Date },
+        reviewedBy: { type: String },
+        certificateFile: { type: Buffer },
+        certificateMimeType: { type: String },
+        remarks: { type: String }
+    },
 
     // --- WHATSAPP LEAD FIELDS ---
     isAiControlled: { type: Boolean, default: true },

@@ -12,10 +12,7 @@ const authMiddleware = (req, res, next) => {
 
         // SECURITY: Multi-Stream Ownership Check
         // Only apply this check to 'student' roles. 
-        // We skip this for 'founder', 'accounts', etc., so they can manage all batches.
         if (req.user.role === 'student' && req.params.batchId) {
-            
-            // Convert to string to ensure matching if one is an ObjectId
             const authorizedBatches = req.user.activeBatches?.map(id => id.toString()) || [];
             const requestedBatchId = req.params.batchId.toString();
 
@@ -40,7 +37,6 @@ const authMiddleware = (req, res, next) => {
  */
 const authorize = (...allowedRoles) => {
     return (req, res, next) => {
-        // Ensure user is authenticated and has the correct role
         if (!req.user || !allowedRoles.includes(req.user.role)) {
             return res.status(403).json({ 
                 success: false, 
