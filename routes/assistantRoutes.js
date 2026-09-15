@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const assistantController = require('../controllers/assistantController');
+const { handleAssistantRequest } = require('../controllers/assistantController');
 
-// Single endpoint to handle both AI chat and secure redirects
-router.post('/process', assistantController.handleAssistantRequest);
+// The frontend will hit this at: /api/assistant/chat
+router.post('/chat', handleAssistantRequest);
 
 module.exports = router;

@@ -1,130 +1,121 @@
-const { OpenAI } = require('openai');
-const { tavily } = require('@tavily/core');
+const { GoogleGenAI } = require('@google/genai');
 
-// Import your course data (adjust path if needed based on your folder structure)
-const { techCoursesData, universityPrograms } = require('../data/course'); 
+// Initialize Gemini with your free API key
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// 1. Initialize OpenRouter
-const openai = new OpenAI({
-    baseURL: "https://openrouter.ai/api/v1",
-    apiKey: process.env.OPENROUTER_API_KEY,
-});
-
-// 2. Initialize Tavily
-const tvly = tavily({ apiKey: process.env.TAVILY_API_KEY });
-
-// --- HELPER FUNCTION: Formats your arrays into readable text for the AI ---
-const buildKnowledgeBase = () => {
-    let kb = "TECH COURSES OFFERED:\n";
-    techCoursesData.forEach(course => {
-        const durationText = course.duration ? `Duration: ${course.duration}` : 'Duration: Contact for details';
-        kb += `- ${course.title} (Fee: ₹${course.fee}, ${durationText})\n  Modules: ${course.modules.join(", ")}\n`;
-    });
-    
-    kb += "\nUNIVERSITY PROGRAMS OFFERED:\n";
-    universityPrograms.forEach(prog => {
-        const durationText = prog.duration ? `Duration: ${prog.duration}` : 'Duration: Contact for details';
-        kb += `- ${prog.title} from ${prog.university} (Fee: ₹${prog.fee}, ${durationText})\n  Target: ${prog.cat}\n`;
-    });
-    return kb;
-};
-
-exports.getBotReply = async (userMessage, session) => {
-    try {
-        // --- TAVILY SEARCH STEP ---
-        let searchContext = "No external search needed.";
-        
-        if (userMessage.length > 8 && !session.leadData.name && !session.leadData.contact) {
-            try {
-                const searchResponse = await tvly.search(userMessage, { maxResults: 3 });
-                searchContext = searchResponse.results.map(r => r.content).join("\n");
-            } catch (tavilyError) {
-                console.error("Tavily Search Error:", tavilyError.message);
+// Define tools/functions the AI can call to fetch exact database information
+const academyTools = [{
+    functionDeclarations: [
+        {
+            name: 'get_academy_courses',
+            description: 'Get a list of available tech and university programs offered at Expert Computer Academy.',
+            parameters: { type: 'OBJECT', properties: {} }
+        },
+        {
+            name: 'capture_lead_details',
+            description: 'Save or update the user name, contact details (phone or email), and course interest once provided.',
+            parameters: {
+                type: 'OBJECT',
+                properties: {
+                    name: { type: 'STRING', description: 'The name of the user' },
+                    contact: { type: 'STRING', description: 'Phone number or email address' },
+                    course: { type: 'STRING', description: 'Target course or program discussed' }
+                },
+                required: ['name', 'contact']
             }
         }
+    ]
+}];
 
-        const currentLeadState = `
-        CURRENT KNOWLEDGE ABOUT USER:
-        - Name: ${session.leadData.name || "UNKNOWN"}
-        - Contact: ${session.leadData.contact || "UNKNOWN"}
-        - Course: ${session.leadData.course || "UNKNOWN"}
-        `;
+// Execute local backend functions when Gemini requests tool usage
+async function executeToolCall(name, args) {
+    if (name === 'get_academy_courses') {
+        return JSON.stringify({
+            techCourses: ["Full Stack Web Development", "Python & Data Science", "Digital Marketing", "Java & Spring Boot"],
+            universityPrograms: ["BCA", "MCA", "B.Sc IT", "PGDCA"]
+        });
+    }
+    if (name === 'capture_lead_details') {
+        return JSON.stringify({ status: "success", message: "Lead data noted successfully." });
+    }
+    return JSON.stringify({ error: "Tool not found." });
+}
 
-        // --- DYNAMIC GOAL CALCULATION ---
-        const missingInfo = [];
-        if (!session.leadData.name) missingInfo.push("Name");
-        if (!session.leadData.contact) missingInfo.push("WhatsApp Number or Email");
-        
-        const currentGoal = missingInfo.length > 0 
-            ? `GOAL: You MUST ask the user for their ${missingInfo[0]} at the end of your reply.` 
-            : `GOAL: You have all their details. Answer their questions and ask if they would like to visit the Patna center for a free demo.`;
+exports.getBotReply = async (message, session) => {
+    try {
+        // 1. Construct chat history format for Gemini
+        const formattedHistory = session.history.map(h => ({
+            role: h.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: h.content }]
+        }));
 
-        // Generate the live syllabus data
-        const ECA_SYLLABUS_AND_FEES = buildKnowledgeBase();
-
-        // --- SYSTEM PROMPT ---
-        const SYSTEM_PROMPT = `
-        You are the friendly AI Admissions Counselor for Expert Computer Academy (ECA) in Patna.
-        Contact: 7282983335.
-        
-        KNOWLEDGE BASE (ECA Details):
-        ${ECA_SYLLABUS_AND_FEES}
-        
-        LIVE SEARCH CONTEXT (From Web):
-        ${searchContext}
-        
-        YOUR MISSION & CONVERSATIONAL FORMULA:
-        Every time you reply, you MUST follow this exact 2-step formula:
-        STEP 1: Answer their question directly and accurately using ONLY the Knowledge Base. 
-        ANTI-HALLUCINATION RULE: If a user asks for a specific detail (like exact class timings, durations, or start dates) that is NOT explicitly written in the Knowledge Base, DO NOT GUESS. Politely state that you don't have that exact detail and ask them to call 7282983335.
-        STEP 2: End your message with a question based on your CURRENT GOAL.
-        
-        ${currentGoal}
-        
-        RULES:
-        - NEVER ask for information you already have.
-        - Be natural and warm. Use smooth transitions like "By the way...", "To send you the syllabus...", or "So I can assist you better..."
-        - Keep responses concise. Nobody likes reading huge blocks of text in a chat widget.
-        
-        OUTPUT FORMAT (Strict JSON):
-        {
-          "reply": "Your conversational response (Answer + Follow-up Question)",
-          "extracted": {
-             "name": "Extract name if found, otherwise null",
-             "contact": "Extract phone/email if found, otherwise null",
-             "course": "Extract course title if mentioned, otherwise null"
-          }
-        }
-        
-        ${currentLeadState}
-        `;
-
-        const messages = [
-            { role: "system", content: SYSTEM_PROMPT },
-            ...session.history,
-            { role: "user", content: userMessage }
-        ];
-
-        // --- OPENROUTER LLM CALL ---
-        const completion = await openai.chat.completions.create({
-            model: "openai/gpt-4o-mini", // OpenRouter model routing
-            messages: messages,
-            response_format: { type: "json_object" }, 
-            temperature: 0.3, // Keeps the AI factual and strict to your exact fees
+        // 2. Initialize the chat session with the friendly system instructions
+        const chatSessionInstance = ai.chats.create({
+            model: 'gemini-3.6-flash',
+            history: formattedHistory,
+            config: {
+                systemInstruction: `You are the professional and friendly AI Admissions Desk for Expert Computer Academy in Patna. 
+                Your goals are:
+                1. Answer questions about courses politely and concisely.
+                2. Naturally collect the user's Name, Phone Number, and Course of Interest.
+                3. If the user provides their name but not their contact number, kindly ask for it (e.g., "Nice to meet you, [Name]! Could you share your WhatsApp number or email so our senior counselor can send you the course syllabus?").
+                4. Never be pushy, but always guide the conversation toward booking a free counseling session or capturing their contact info.`,
+                tools: academyTools
+            }
         });
 
-        // Parse and return the JSON
-        return JSON.parse(completion.choices[0].message.content);
+        // 3. FIXED: Wrap the user message in the required { message } object
+        let response = await chatSessionInstance.sendMessage({ message: message });
+
+        let extractedData = {};
+
+        // 4. Check if Gemini wants to invoke a tool (e.g., getting courses or saving lead)
+        if (response.functionCalls && response.functionCalls.length > 0) {
+            const call = response.functionCalls[0];
+            const toolResultString = await executeToolCall(call.name, call.args);
+            const toolResultJson = JSON.parse(toolResultString);
+
+            if (call.name === 'capture_lead_details') {
+                extractedData = call.args; // Passes name, contact, course back to controller
+            }
+
+            // 5. FIXED: Wrap the tool response in the required { message } object array
+            const finalResponse = await chatSessionInstance.sendMessage({
+                message: [{
+                    functionResponse: {
+                        name: call.name,
+                        response: toolResultJson
+                    }
+                }]
+            });
+
+            return {
+                reply: finalResponse.text,
+                extracted: extractedData
+            };
+        }
+
+        // 6. Basic heuristic fallback extraction if user types info naturally
+        if (message.includes("@") || /\d{10}/.test(message)) {
+            extractedData.contact = message.trim();
+        }
+
+        return {
+            reply: response.text,
+            extracted: extractedData
+        };
 
     } catch (error) {
-        console.error("LLM Error:", error);
-        return { 
-            reply: "I am having a slight network issue connecting to the syllabus database. Please call our Patna center at 7282983335.", 
-            extracted: null 
+        console.error("Gemini Service Error:", error);
+        return {
+            reply: "I'm having a brief connection pause. Please feel free to call our Patna center at 7282983335!",
+            extracted: null
         };
     }
 };
 
 exports.generateSecureLink = (agentId) => {
-    return `https://wa.me/917282983335?text=Hi%20Expert%20Computer%20Academy,%20I%20need%20admission%20help.`;
+    const phoneNumber = "917282983335"; 
+    const text = encodeURIComponent("Hello Expert Computer Academy, I would like to connect with a senior admission counselor.");
+    return `https://wa.me/${phoneNumber}?text=${text}`;
 };

@@ -1,8 +1,7 @@
 const assistantService = require('../services/assistantService');
-const Inquiry = require('../models/Inquiry'); // Your Mongo Model
-const { sendInquiryEmail } = require('../services/mailService'); // Your Mail Service
-
-const chatSessions = {};
+const Inquiry = require('../models/Inquiry');
+const ChatSession = require('../models/ChatSession');
+const { sendInquiryEmail } = require('../services/mailService');
 
 exports.handleAssistantRequest = async (req, res) => {
     try {
@@ -13,21 +12,18 @@ exports.handleAssistantRequest = async (req, res) => {
         }
 
         if (type === 'chat') {
-            // Initialize Session
-            if (!chatSessions[sessionId]) {
-                chatSessions[sessionId] = {
+            let session = await ChatSession.findOne({ sessionId });
+            if (!session) {
+                session = await ChatSession.create({
+                    sessionId,
                     history: [],
                     leadData: { name: null, contact: null, course: null },
                     isLeadSaved: false
-                };
+                });
             }
 
-            const session = chatSessions[sessionId];
-
-            // 1. Get AI Response and Extracted Data
             const botResponse = await assistantService.getBotReply(message, session);
             
-            // Safety Check in case LLM fails to return proper JSON structure
             if (!botResponse || !botResponse.reply) {
                 return res.json({ 
                     success: true, 
@@ -35,27 +31,23 @@ exports.handleAssistantRequest = async (req, res) => {
                 });
             }
 
-            // 2. Silently update session with new extracted data
             if (botResponse.extracted) {
                 if (botResponse.extracted.name) session.leadData.name = botResponse.extracted.name;
                 if (botResponse.extracted.contact) session.leadData.contact = botResponse.extracted.contact;
                 if (botResponse.extracted.course) session.leadData.course = botResponse.extracted.course;
             }
 
-            // 3. --- SILENT LEAD SAVING TO MONGODB ---
+            // --- SILENT LEAD SAVING TO MONGODB ---
             if (session.leadData.name && session.leadData.contact && !session.leadData.isLeadSaved) {
-                
-                // Parse contact to determine if it is an email or a phone number
                 let phone = "Not Provided";
                 let email = "Not Provided";
                 
                 if (session.leadData.contact.includes("@")) {
                     email = session.leadData.contact.toLowerCase().trim();
                 } else {
-                    phone = session.leadData.contact.replace(/\D/g, ''); // Strip non-numeric chars
+                    phone = session.leadData.contact.replace(/\D/g, '');
                 }
 
-                // SMART DUPLICATE CHECK (Matches manual form logic)
                 const duplicateQuery = [];
                 if (phone !== "Not Provided") duplicateQuery.push({ phone: phone });
                 if (email !== "Not Provided") duplicateQuery.push({ email: email });
@@ -65,40 +57,35 @@ exports.handleAssistantRequest = async (req, res) => {
                     : null;
 
                 if (!existingInquiry) {
-                    // Create and save the new lead
                     const newInquiry = new Inquiry({
                         name: session.leadData.name,
                         email: email,
                         phone: phone,
                         course: session.leadData.course || "General Inquiry",
                         message: "Lead captured automatically via AI Assistant.",
-                        source: "AI Chatbot" // Flags where the lead came from in Admin Panel
+                        source: "AI Chatbot"
                     });
                     
                     await newInquiry.save();
                     console.log("🔥 NEW AI LEAD SAVED TO MONGODB:", session.leadData.name);
 
-                    // Trigger your existing mail notification
                     try {
                         await sendInquiryEmail(newInquiry);
                     } catch (mailErr) {
                         console.warn("Mail failed for AI Lead, but lead saved securely.");
                     }
-                } else {
-                    console.log("⚠️ AI Lead skipped - Duplicate found in DB.");
                 }
-                
-                // Lock the session so we don't save the same person twice in one chat
                 session.leadData.isLeadSaved = true; 
             }
             
-            // 4. Update Conversation History
             session.history.push({ role: 'user', content: message });
             session.history.push({ role: 'assistant', content: botResponse.reply });
 
-            if (session.history.length > 10) session.history = session.history.slice(-10);
+            if (session.history.length > 10) {
+                session.history = session.history.slice(-10);
+            }
 
-            // 5. Send only the conversational text back to the React widget
+            await session.save();
             return res.json({ success: true, reply: botResponse.reply });
         }
 

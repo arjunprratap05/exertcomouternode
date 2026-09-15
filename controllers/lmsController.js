@@ -9,6 +9,7 @@ const axios = require('axios');
 const techCoursesData = courseData.techCoursesData || [];
 const universityPrograms = courseData.universityPrograms || [];
 const allConfiguredCourses = [...techCoursesData, ...universityPrograms];
+const { GoogleGenAI } = require('@google/genai');
 
 // --- 1. ADD LECTURE ---
 exports.addLecture = async (req, res) => {
@@ -137,6 +138,7 @@ exports.deleteMaterial = async (req, res) => {
     }
 };
 
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 exports.handleStudentChat = async (req, res) => {
     try {
@@ -148,42 +150,73 @@ exports.handleStudentChat = async (req, res) => {
 
         console.log(`[AI] Processing student query: "${message}"`);
 
-        // 1. SMART DETECTION: Check if the student is asking for visual aids
-        const wantsDiagram = /(diagram|image|picture|visual|draw|graph|chart|architecture)/i.test(message);
+        // 1. SMART DETECTION: Check if the student wants to generate an image
+        const wantsDiagram = /(diagram|image|picture|visual|draw|graph|chart|architecture|generate)/i.test(message);
 
-        // Connect to Tavily's Live Research API
-        const response = await axios.post('https://api.tavily.com/search', {
+        // 2. Start the Tavily live research for the text explanation
+        const tavilyPromise = axios.post('https://api.tavily.com/search', {
             api_key: process.env.TAVILY_API_KEY,
             query: message,
             search_depth: "basic",
             include_answer: true, 
-            include_images: wantsDiagram, // 2. Tell Tavily to scrape images if requested
+            include_images: false, // Turn off scraping, we are generating our own now!
             max_results: 3
         });
 
-        let aiResponse = response.data.answer;
-        
-        // 3. Extract the images array (Default to empty array if none found)
-        let aiImages = response.data.images || [];
+        let aiImages = [];
 
-        if (!aiResponse) {
-            if (response.data.results && response.data.results.length > 0) {
-                aiResponse = "I couldn't formulate a direct answer, but here is what I found in my live research:\n\n" + 
-                             response.data.results.map((r, index) => `${index + 1}. ${r.content}`).join("\n\n");
-            } else {
-                aiResponse = "I'm sorry, but I couldn't find accurate information regarding that topic in my live database.";
+        // 3. If an image is requested, GENERATE it using Google Imagen 3 simultaneously
+        if (wantsDiagram) {
+            try {
+                console.log("[AI] Generating custom educational image...");
+                
+                // FIXED: Use generateContent to bypass the Enterprise restriction
+                const imgResponse = await ai.models.generateContent({
+                    model: 'gemini-2.5-flash-image', // <-- Updated to the active GA model
+                    contents: message
+                });
+                
+                // FIXED: Extract the Base64 image data correctly from the new response format
+                const imagePart = imgResponse.candidates[0].content.parts.find(p => p.inlineData);
+                
+                if (imagePart && imagePart.inlineData) {
+                    const base64Data = imagePart.inlineData.data;
+                    const mimeType = imagePart.inlineData.mimeType || 'image/jpeg';
+                    aiImages.push(`data:${mimeType};base64,${base64Data}`);
+                }
+            } catch (imgErr) {
+                console.error("Image Generation Error:", imgErr.message);
+                // We don't crash the whole chat if the image fails; the student still gets text
             }
         }
 
-        // 4. Return both the text and a max of 2 images to the frontend
+        // 4. Wait for Tavily to finish getting the text answer
+        const response = await tavilyPromise;
+        let aiResponse = response.data.answer;
+
+        if (!aiResponse) {
+            if (response.data.results && response.data.results.length > 0) {
+                aiResponse = "I couldn't formulate a direct answer, but here is what I found:\n\n" + 
+                             response.data.results.map((r, index) => `${index + 1}. ${r.content}`).join("\n\n");
+            } else {
+                aiResponse = wantsDiagram 
+                    ? "Here is the visual representation you requested!" 
+                    : "I'm sorry, but I couldn't find accurate information regarding that topic in my live database.";
+            }
+        }
+
+        // 5. Return both the researched text and the generated image to the frontend
         return res.status(200).json({ 
             success: true, 
             response: aiResponse,
-            images: aiImages.slice(0, 2) // Limit to top 2 images to keep the chat UI clean
+            images: aiImages 
         });
 
     } catch (error) {
-        console.error("Tavily AI Engine Error:", error.response?.data || error.message);
-        return res.status(500).json({ success: false, error: "The AI Research Engine is currently experiencing high load. Please try again." });
+        console.error("AI Engine Error:", error.response?.data || error.message);
+        return res.status(500).json({ 
+            success: false, 
+            error: "The AI Engine is currently experiencing high load. Please try again." 
+        });
     }
 };
