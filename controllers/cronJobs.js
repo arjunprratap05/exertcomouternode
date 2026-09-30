@@ -35,6 +35,7 @@ exports.triggerMonthlyReport = async (req, res) => {
         
         const statsAll = {};
         const statsCurrent = {};
+        const monthlyHistory = {};     // Time-Series Aggregation Map
         
         const currentMonthStudents = [];
         const currentMonthEnquiries = [];
@@ -64,19 +65,29 @@ exports.triggerMonthlyReport = async (req, res) => {
                 totalRevenue += amt;
 
                 const enrollmentDate = new Date(en.enrolledAt || student.createdAt || student.date || Date.now());
-                const enrollMonthKey = `${enrollmentDate.getFullYear()}-${String(enrollmentDate.getMonth() + 1).padStart(2, '0')}`;
+                
+                if (!isNaN(enrollmentDate.getTime())) {
+                    const enrollMonthKey = `${enrollmentDate.getFullYear()}-${String(enrollmentDate.getMonth() + 1).padStart(2, '0')}`;
 
-                // Track Current Month Metrics
-                if (enrollMonthKey === targetMonthKey) {
-                    currentMonthRevenue += amt;
-                    studentHasCurrentMonthEnrollment = true;
+                    // Track Monthly Trends for the Time-Series Graph
+                    if (!monthlyHistory[enrollMonthKey]) {
+                        monthlyHistory[enrollMonthKey] = { revenue: 0, enrollments: 0 };
+                    }
+                    monthlyHistory[enrollMonthKey].revenue += amt;
+                    monthlyHistory[enrollMonthKey].enrollments += 1;
 
-                    if (en.course) {
-                        if (!statsCurrent[en.course]) {
-                            statsCurrent[en.course] = { enrollments: 0, revenue: 0 };
+                    // Track Current Month Metrics
+                    if (enrollMonthKey === targetMonthKey) {
+                        currentMonthRevenue += amt;
+                        studentHasCurrentMonthEnrollment = true;
+
+                        if (en.course) {
+                            if (!statsCurrent[en.course]) {
+                                statsCurrent[en.course] = { enrollments: 0, revenue: 0 };
+                            }
+                            statsCurrent[en.course].enrollments += 1;
+                            statsCurrent[en.course].revenue += amt;
                         }
-                        statsCurrent[en.course].enrollments += 1;
-                        statsCurrent[en.course].revenue += amt;
                     }
                 }
 
@@ -140,6 +151,7 @@ exports.triggerMonthlyReport = async (req, res) => {
             { header: 'Enrolled Program(s)', key: 'course', width: 40 },
             { header: 'Collection (₹)', key: 'revenue', width: 18, style: { numFmt: '₹#,##0.00' } },
             { header: 'Portal Status', key: 'status', width: 15 },
+            { header: 'Aadhaar Status', key: 'aadhaar', width: 20 },
             { header: 'Registration Date', key: 'date', width: 20 }
         ];
         styleHeaderRow(sheetCurrentReg);
@@ -165,6 +177,7 @@ exports.triggerMonthlyReport = async (req, res) => {
                 course: coursesList.join(', ') || 'General Enquiry',
                 revenue: studentMonthPaid,
                 status: student.isApproved ? 'ACTIVE' : 'INACTIVE',
+                aadhaar: student.aadhaarNo || student.aadhar ? '[Aadhaar Redacted]' : 'Pending',
                 date: new Date(student.createdAt || student.date || Date.now()).toLocaleDateString()
             });
         });
@@ -176,6 +189,7 @@ exports.triggerMonthlyReport = async (req, res) => {
         // ==========================================
         const wbMaster = new ExcelJS.Workbook();
         
+        // --- 1. Master Registry Sheet ---
         const sheetRegistry = wbMaster.addWorksheet('All Registrations');
         sheetRegistry.columns = [
             { header: 'Profile Identity', key: 'name', width: 25 },
@@ -183,6 +197,7 @@ exports.triggerMonthlyReport = async (req, res) => {
             { header: 'Enrolled Program(s)', key: 'course', width: 40 },
             { header: 'Total Revenue (₹)', key: 'revenue', width: 18, style: { numFmt: '₹#,##0.00' } },
             { header: 'Portal Status', key: 'status', width: 15 },
+            { header: 'Aadhaar Status', key: 'aadhaar', width: 20 },
             { header: 'Registration Date', key: 'date', width: 20 }
         ];
         styleHeaderRow(sheetRegistry);
@@ -204,10 +219,31 @@ exports.triggerMonthlyReport = async (req, res) => {
                 course: coursesList.join(', ') || 'General Enquiry',
                 revenue: studentTotalPaid,
                 status: student.isApproved ? 'ACTIVE' : 'INACTIVE',
+                aadhaar: student.aadhaarNo || student.aadhar ? '[Aadhaar Redacted]' : 'Pending',
                 date: new Date(student.createdAt || student.date || Date.now()).toLocaleDateString()
             });
         });
 
+        // --- 2. Time-Series Monthly Trends Sheet ---
+        const sheetTrends = wbMaster.addWorksheet('Monthly Trends (Time Series)');
+        sheetTrends.columns = [
+            { header: 'Month-Year', key: 'month', width: 20 },
+            { header: 'Total Enrollments', key: 'enrollments', width: 20 },
+            { header: 'Gross Revenue (₹)', key: 'revenue', width: 25, style: { numFmt: '₹#,##0.00' } }
+        ];
+        styleHeaderRow(sheetTrends);
+
+        Object.entries(monthlyHistory)
+            .sort(([a], [b]) => a.localeCompare(b)) // Chronological sort
+            .forEach(([monthStr, data]) => {
+                sheetTrends.addRow({
+                    month: monthStr,
+                    enrollments: data.enrollments,
+                    revenue: data.revenue
+                });
+            });
+
+        // --- 3. Web Leads Sheet ---
         const sheetLeads = wbMaster.addWorksheet('Web Leads');
         sheetLeads.columns = [
             { header: 'Lead Identity', key: 'name', width: 25 },
@@ -230,6 +266,7 @@ exports.triggerMonthlyReport = async (req, res) => {
             });
         });
 
+        // --- 4. Coupons Sheet ---
         const sheetCoupons = wbMaster.addWorksheet('Coupons');
         sheetCoupons.columns = [
             { header: 'Campaign Narrative', key: 'desc', width: 40 },
@@ -254,6 +291,7 @@ exports.triggerMonthlyReport = async (req, res) => {
             });
         });
 
+        // --- 5. Active Batches Sheet ---
         const sheetBatches = wbMaster.addWorksheet('Active Batches');
         sheetBatches.columns = [
             { header: 'Batch Code', key: 'code', width: 20 },
@@ -351,7 +389,7 @@ exports.triggerMonthlyReport = async (req, res) => {
                         <h3 style="border-bottom: 2px solid #f1f5f9; padding-bottom: 10px; margin-top: 0;">Cumulative Data as of ${targetMonthKey}</h3>
                         
                         <p>Dear Founder,</p>
-                        <p>Please find the complete historical overview below. <strong>The attached master ledger contains all-time multi-sheet records for Registrations, Web Leads, Coupons, and Active Batches.</strong></p>
+                        <p>Please find the complete historical overview below. <strong>The attached master ledger contains all-time multi-sheet records for Registrations, Time-Series Growth, Web Leads, Coupons, and Active Batches.</strong></p>
 
                         <div style="display: flex; gap: 20px; margin-bottom: 30px; margin-top: 20px;">
                             <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; flex: 1;">
