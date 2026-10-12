@@ -113,7 +113,6 @@ router.post('/instructors', async (req, res) => {
     }
 });
 
-// 3. Update instructor status (Active <-> On Leave)
 router.patch('/instructors/:id', async (req, res) => {
     try {
         const { status } = req.body;
