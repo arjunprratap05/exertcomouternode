@@ -7,6 +7,7 @@ const { getWhatsAppLeads,getWhatsAppChat,toggleAiControl,sendManualWhatsAppMessa
 const { globalSearch } = require('../controllers/globalSearchController');
 const { tracePersonWithRelatives } = require('../controllers/traceController');
 const { getDirectWhatsAppChats } = require('../controllers/whatsappController');
+const Instructor = require('../models/Instructor');
 
 router.get('/global-search', globalSearch);
 router.get('/trace/:phone', tracePersonWithRelatives);
@@ -79,5 +80,58 @@ router.post('/send-whatsapp', sendManualWhatsAppMessage);
 router.post('/reports/dispatch-founder-report', adminController.dispatchFounderReport);
 
 router.post('/chat', adminController.handleAdminChat);
+
+router.get('/instructors', async (req, res) => {
+    try {
+        const instructors = await Instructor.find().sort({ createdAt: -1 });
+        res.status(200).json(instructors);
+    } catch (error) {
+        console.error("Error fetching instructors:", error);
+        res.status(500).json({ success: false, message: "Failed to fetch instructors" });
+    }
+});
+
+// 2. Add a new instructor
+router.post('/instructors', async (req, res) => {
+    try {
+        const { name, subject, phone, totalHours, activeBatches, status } = req.body;
+        
+        const newInstructor = new Instructor({
+            name,
+            subject,
+            phone,
+            totalHours: totalHours || 0,
+            activeBatches: activeBatches || 0,
+            status: status || 'Active'
+        });
+
+        await newInstructor.save();
+        res.status(201).json({ success: true, instructor: newInstructor });
+    } catch (error) {
+        console.error("Error adding instructor:", error);
+        res.status(500).json({ success: false, message: "Failed to add instructor" });
+    }
+});
+
+// 3. Update instructor status (Active <-> On Leave)
+router.patch('/instructors/:id', async (req, res) => {
+    try {
+        const { status } = req.body;
+        const updatedInstructor = await Instructor.findByIdAndUpdate(
+            req.params.id, 
+            { status }, 
+            { new: true }
+        );
+        
+        if (!updatedInstructor) {
+            return res.status(404).json({ success: false, message: "Instructor not found" });
+        }
+        
+        res.status(200).json({ success: true, instructor: updatedInstructor });
+    } catch (error) {
+        console.error("Error updating instructor:", error);
+        res.status(500).json({ success: false, message: "Failed to update status" });
+    }
+});
 
 module.exports = router;
